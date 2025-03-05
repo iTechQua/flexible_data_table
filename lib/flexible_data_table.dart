@@ -6,6 +6,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:permission_handler/permission_handler.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:universal_html/html.dart' as html;
 import 'package:excel/excel.dart' as excel;
 
@@ -104,6 +106,28 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
 
   Color get _checkboxColor => widget.checkboxColor ??
       (Theme.of(context).brightness == Brightness.dark ? Colors.white70 : Colors.white);
+
+  Future<bool> checkPermissions() async {
+    final Map<Permission, PermissionStatus> statuses = await [
+      Permission.storage,
+      Permission.manageExternalStorage,
+      Permission.mediaLibrary,
+      Permission.accessMediaLocation,
+      Permission.photos,
+      Permission.camera,
+    ].request();
+
+    if ((statuses[Permission.manageExternalStorage]!.isPermanentlyDenied ||
+        statuses[Permission.storage]!.isPermanentlyDenied ||
+        statuses[Permission.mediaLibrary]!.isPermanentlyDenied ||
+        statuses[Permission.accessMediaLocation]!.isPermanentlyDenied ||
+        statuses[Permission.photos]!.isPermanentlyDenied ||
+        statuses[Permission.camera]!.isPermanentlyDenied) &&
+        Platform.isAndroid) {
+      openAppSettings();
+    }
+    return statuses.values.every((status) => status.isGranted);
+  }
 
   @override
   void initState() {
@@ -675,30 +699,132 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
   }
 
   Widget _buildExportButton() {
-    return PopupMenuButton<String>(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-        decoration: BoxDecoration(
-          color: widget.headerColor,
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Text(
-          'Export',
-          style: GoogleFonts.poppins(color: Colors.white),
+    return Theme(
+      data: Theme.of(context).copyWith(
+        popupMenuTheme: PopupMenuThemeData(
+          elevation: 6,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
         ),
       ),
-      itemBuilder: (context) => [
-        PopupMenuItem(
-          value: 'excel',
-          child: Text('Export to Excel', style: GoogleFonts.poppins()),
-          onTap: _exportToExcel,
+      child: PopupMenuButton<String>(
+        offset: const Offset(-4, 38),
+        icon: null,
+        color: Theme.of(context).brightness == Brightness.dark
+            ? Colors.grey.shade800
+            : Colors.white,
+        tooltip: 'Export options',
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                widget.headerColor.withOpacity(0.9),
+                widget.headerColor,
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(6),
+            boxShadow: [
+              BoxShadow(
+                color: widget.headerColor.withOpacity(0.3),
+                spreadRadius: 1,
+                blurRadius: 3,
+                offset: const Offset(0, 1),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.download_rounded,
+                color: Colors.white,
+                size: 15,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                'Export',
+                style: GoogleFonts.poppins(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w500,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
         ),
-        PopupMenuItem(
-          value: 'pdf',
-          child: Text('Export to PDF', style: GoogleFonts.poppins()),
-          onTap: _exportToPdf,
-        ),
-      ],
+        itemBuilder: (context) => [
+          PopupMenuItem(
+            height: 36,
+            value: 'excel',
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+            onTap: _exportToExcel,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade100,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Icon(
+                    Icons.table_chart_rounded,
+                    color: Colors.green.shade700,
+                    size: 14,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Excel',
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.w500,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          PopupMenuItem(
+            height: 36,
+            value: 'pdf',
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+            onTap: _exportToPdf,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade100,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Icon(
+                    Icons.picture_as_pdf_rounded,
+                    color: Colors.red.shade700,
+                    size: 14,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'PDF',
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.w500,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -726,6 +852,12 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
   }
 
   Widget _buildPageSizeDropdown() {
+    // Define a special value for "All" (using -1 as a marker)
+    const int allItemsValue = -1;
+
+    // Create a list of possible values including the "All" option
+    final List<dynamic> pageSizes = [5, 10, 25, 50, 100, allItemsValue];
+
     return Container(
       height: 40,
       decoration: BoxDecoration(
@@ -735,21 +867,25 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       child: DropdownButtonHideUnderline(
         child: ButtonTheme(
           alignedDropdown: true,
-          child: DropdownButton<int>(
-            value: _pageSize,
-            items: [5, 10, 25, 50, 100].map((int value) {
-              return DropdownMenuItem<int>(
+          child: DropdownButton<dynamic>(
+            value: _pageSize == widget.totalItems ? allItemsValue : _pageSize,
+            items: pageSizes.map((dynamic value) {
+              return DropdownMenuItem<dynamic>(
                 value: value,
-                child: Text('$value', style: GoogleFonts.poppins()),
+                child: Text(
+                  value == allItemsValue ? 'All' : '$value',
+                  style: GoogleFonts.poppins(),
+                ),
               );
             }).toList(),
             onChanged: (value) {
               if (value != null) {
                 setState(() {
-                  _pageSize = value;
+                  // If "All" is selected, set _pageSize to the total number of items
+                  _pageSize = (value == allItemsValue) ? widget.totalItems : value;
                   _currentPage = 0;
                 });
-                widget.onPageChanged?.call(1, value);
+                widget.onPageChanged?.call(1, _pageSize);
               }
             },
           ),
@@ -760,6 +896,11 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
 
   Future<void> _exportToExcel() async {
     try {
+      // Show progress indicator
+      if (mounted) {
+        _showProgressDialog('Generating Excel file...');
+      }
+
       final workbook = excel.Excel.createExcel();
       final sheet = workbook.sheets[workbook.getDefaultSheet() ?? 'Sheet1'];
       if (sheet == null) throw Exception('Failed to create sheet');
@@ -861,14 +1002,28 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       final excelData = workbook.encode();
       if (excelData == null) throw Exception('Failed to save Excel file');
 
+      // Close progress dialog
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+
       await _saveFile(excelData, '${widget.fileName}.xlsx');
     } catch (e) {
+      // Close progress dialog if open
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
       _showErrorDialog('Export Error', e.toString());
     }
   }
 
   Future<void> _exportToPdf() async {
     try {
+      // Show progress indicator
+      if (mounted) {
+        _showProgressDialog('Generating PDF file...');
+      }
+
       final pdf = pw.Document();
       final headerMap = widget.toTableDataMap(_filteredData.first);
 
@@ -903,15 +1058,45 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       );
 
       final bytes = await pdf.save();
+
+      // Close progress dialog
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+
       await _saveFile(bytes, '${widget.fileName}.pdf');
     } catch (e) {
+      // Close progress dialog if open
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
       _showErrorDialog('PDF Export Error', e.toString());
     }
+  }
+
+  void _showProgressDialog(String message) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 16),
+              Text(message),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _saveFile(List<int> bytes, String fileName) async {
     try {
       if (kIsWeb) {
+        // Web platform implementation
         final blob = html.Blob([bytes]);
         final url = html.Url.createObjectUrlFromBlob(blob);
         final anchor = html.AnchorElement(href: url)
@@ -921,24 +1106,170 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
         anchor.click();
         html.document.body?.children.remove(anchor);
         html.Url.revokeObjectUrl(url);
-      } else {
-        final directory = await getApplicationDocumentsDirectory();
-        final file = File('${directory.path}/$fileName');
-        await file.writeAsBytes(bytes);
 
         if (mounted) {
-          _showSuccessDialog('File saved successfully!', {
-            'Location': file.path,
-            'Size': '${(bytes.length / 1024).toStringAsFixed(2)} KB',
-            'Type': fileName.split('.').last.toUpperCase(),
-          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('File downloaded: $fileName'),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+      } else {
+        // Mobile platform - use share functionality
+        try {
+          // For Android/iOS, we'll save to a temporary directory first
+          final tempDir = await getTemporaryDirectory();
+          final filePath = '${tempDir.path}/$fileName';
+          final file = File(filePath);
+
+          // Write the bytes to the file
+          await file.writeAsBytes(bytes);
+
+          // Show the share dialog
+          if (mounted) {
+            // Try with share_plus
+            await Share.shareXFiles(
+              [XFile(filePath)],
+              subject: 'Exported ${fileName.split('.').last} file',
+              text: 'Here is your exported data',
+            );
+
+            // Show success message
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('File shared successfully'),
+                  backgroundColor: Colors.green,
+                ),
+              );
+            }
+          }
+        } catch (e) {
+          // If share fails, try saving to downloads directory
+          await _saveToDownloads(bytes, fileName);
         }
       }
     } catch (e) {
       if (mounted) {
-        _showErrorDialog('Error Saving File', e.toString());
+        _showErrorDialog('Error Saving File', 'Error: ${e.toString()}');
       }
     }
+  }
+
+  Future<void> _saveToDownloads(List<int> bytes, String fileName) async {
+    try {
+      Directory? directory;
+
+      if (Platform.isAndroid) {
+        // Check for storage permission
+        var status = await Permission.storage.status;
+        if (!status.isGranted) {
+          status = await Permission.storage.request();
+          if (!status.isGranted) {
+            throw Exception('Storage permission not granted');
+          }
+        }
+
+        // Try to access downloads directory on Android
+        directory = Directory('/storage/emulated/0/Download');
+        if (!await directory.exists()) {
+          // Fallback to documents directory
+          directory = await getApplicationDocumentsDirectory();
+        }
+      } else {
+        // On iOS, use documents directory
+        directory = await getApplicationDocumentsDirectory();
+      }
+
+      final filePath = '${directory.path}/$fileName';
+      final file = File(filePath);
+
+      await file.writeAsBytes(bytes);
+
+      if (mounted) {
+        _showSuccessDialog('File saved successfully!', {
+          'Location': filePath,
+          'Size': '${(bytes.length / 1024).toStringAsFixed(2)} KB',
+          'Type': fileName.split('.').last.toUpperCase(),
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        _showErrorDialog('Error Saving to Downloads', e.toString());
+      }
+    }
+  }
+
+  void _showExportOptionsDialog(String filePath, String fileName) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.file_download_done, color: Colors.green),
+            SizedBox(width: 8),
+            Text('File Saved'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Your file has been saved to:'),
+            SizedBox(height: 8),
+            Container(
+              padding: EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                filePath,
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+            SizedBox(height: 16),
+            Text('What would you like to do next?'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+            },
+            child: Text('Close'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.of(context).pop();
+              try {
+                await Share.shareXFiles(
+                  [XFile(filePath)],
+                  subject: 'Exported File',
+                  text: 'Here is your exported data',
+                );
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Unable to share file: ${e.toString()}'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              }
+            },
+            child: Text('Share'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: widget.headerColor,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showErrorDialog(String title, String message) {

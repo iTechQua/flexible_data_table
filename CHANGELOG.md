@@ -1,3 +1,10 @@
+## [1.0.1] - 2025-03-5
+
+### Updated
+- This version update export functionality option UI
+- Fix export issue on mobile device
+
+
 ## [1.0.0] - 2025-02-14
 
 ### Added
