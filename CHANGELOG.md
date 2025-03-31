@@ -1,3 +1,10 @@
+## [1.0.2] - 2025-03-31
+
+### Updated
+- This version fix table width issue now capture all available width 
+- This version fix header name hide issue when data not found/available
+
+
 ## [1.0.1] - 2025-03-5
 
 ### Updated

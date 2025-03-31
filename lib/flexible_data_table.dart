@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -128,6 +129,16 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     }
     return statuses.values.every((status) => status.isGranted);
   }
+  Map<String, dynamic>? _defaultHeaderMap;
+
+// Add this method to set default headers from the first non-empty data
+  void _updateDefaultHeaderMap() {
+    if (_defaultHeaderMap == null || _defaultHeaderMap!.isEmpty) {
+      if (widget.data.isNotEmpty) {
+        _defaultHeaderMap = Map<String, dynamic>.from(widget.toTableDataMap(widget.data.first));
+      }
+    }
+  }
 
   @override
   void initState() {
@@ -137,6 +148,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     _pageSize = widget.pageSize;
     _setupScrollControllers();
     _updateEffectiveTotalItems();
+    _updateDefaultHeaderMap(); // Add this line
   }
 
   void _updateEffectiveTotalItems() {
@@ -148,6 +160,8 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
   @override
   void didUpdateWidget(FlexibleDataTable<T> oldWidget) {
     super.didUpdateWidget(oldWidget);
+    _updateDefaultHeaderMap(); // Add this line
+
     if (oldWidget.data != widget.data) {
       setState(() {
         if (_searchQuery.isNotEmpty) {
@@ -168,6 +182,22 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
   // Update _buildTableBody to use pagination based on isServerSide
   Widget _buildTableBody(Map<String, dynamic> headerMap, double tableWidth) {
     if (_filteredData.isEmpty) {
+      // Create a single empty row to show under the headers
+      final List<Widget> emptyCells = [];
+
+      // Add checkbox cell if needed
+      if (widget.showCheckboxColumn) {
+        emptyCells.add(Container(height: 100));
+      }
+
+      // Add cells for each header column
+      for (int i = 0; i < headerMap.length; i++) {
+        emptyCells.add(Container(height: 100));
+      }
+
+      // Add action column cell
+      emptyCells.add(Container(height: 100));
+
       return Stack(
         children: [
           SingleChildScrollView(
@@ -178,12 +208,13 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
               child: Table(
                 defaultVerticalAlignment: TableCellVerticalAlignment.middle,
                 columnWidths: _buildColumnWidths(headerMap),
+                border: TableBorder(
+                  horizontalInside: BorderSide(color: _border),
+                  verticalInside: BorderSide(color: _border),
+                ),
                 children: [
                   TableRow(
-                    children: List.generate(
-                      headerMap.length + (widget.showCheckboxColumn ? 2 : 1),
-                          (_) => Container(height: 100),
-                    ),
+                    children: emptyCells,
                   ),
                 ],
               ),
@@ -202,6 +233,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       );
     }
 
+    // Normal table with data
     final startIndex = widget.isServerSide ? 0 : _currentPage * _pageSize;
     final endIndex = widget.isServerSide
         ? _filteredData.length
@@ -449,50 +481,86 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
 
   Widget _buildTable() {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
-    final Map<String, dynamic> headerMap = widget.data.isNotEmpty
-        ? Map<String, dynamic>.from(widget.toTableDataMap(widget.data.first))
-        : {};
 
-    final double totalWidth = _calculateTotalWidth(headerMap);
-    final double tableWidth = math.max(totalWidth, widget.minWidth ?? 0);
+    // Determine header map with a preference order
+    Map<String, dynamic> headerMap;
 
-    return Container(
-      decoration: BoxDecoration(
-        border: Border.all(color: _border),
-        borderRadius: BorderRadius.circular(4),
-        color: isDarkMode ? Colors.grey[900] : Colors.white,
-      ),
-      child: Column(
-        children: [
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            controller: _headerScrollController,
-            child: SizedBox(
-              width: tableWidth,
-              height: widget.headerHeight,
-              child: Table(
-                columnWidths: _buildColumnWidths(headerMap),
-                children: [
-                  TableRow(
-                    decoration: BoxDecoration(
-                      color: widget.headerColor,
-                      borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
-                    ),
-                    children: _buildHeaderCells(headerMap).map((cell) =>
-                        SizedBox(height: widget.headerHeight, child: cell)
-                    ).toList(),
-                  ),
-                ],
-              ),
+    // First try to use the current data
+    if (widget.data.isNotEmpty) {
+      headerMap = Map<String, dynamic>.from(widget.toTableDataMap(widget.data.first));
+    }
+    // Then try to use our cached default header map
+    else if (_defaultHeaderMap != null && _defaultHeaderMap!.isNotEmpty) {
+      headerMap = _defaultHeaderMap!;
+    }
+    // Then try to use custom header builders
+    else if (widget.customHeaderBuilders != null && widget.customHeaderBuilders!.isNotEmpty) {
+      headerMap = Map<String, dynamic>.fromIterable(
+          widget.customHeaderBuilders!.keys,
+          value: (_) => null
+      );
+    }
+    // As a last resort, provide at least some default headers
+    else {
+      // Create basic placeholder headers if we have absolutely nothing else
+      headerMap = {'ID': null, 'Name': null, 'Description': null};
+    }
+
+    final double totalColumnWidth = _calculateTotalWidth(headerMap);
+
+    // Get available width from layout builder
+    return LayoutBuilder(
+        builder: (context, constraints) {
+          final double availableWidth = constraints.maxWidth;
+          final double requestedMinWidth = widget.minWidth ?? 0;
+
+          // Use the larger of total column width, available width, or requested min width
+          final double tableWidth = math.max(
+              totalColumnWidth,
+              math.max(availableWidth, requestedMinWidth)
+          );
+
+          return Container(
+            decoration: BoxDecoration(
+              border: Border.all(color: _border),
+              borderRadius: BorderRadius.circular(4),
+              color: isDarkMode ? Colors.grey[900] : Colors.white,
             ),
-          ),
-          Expanded(
-            child: _buildTableBody(headerMap, tableWidth),
-          ),
-        ],
-      ),
+            child: Column(
+              children: [
+                // Headers are always shown
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  controller: _headerScrollController,
+                  child: SizedBox(
+                    width: tableWidth,
+                    height: widget.headerHeight,
+                    child: Table(
+                      columnWidths: _buildColumnWidths(headerMap),
+                      children: [
+                        TableRow(
+                          decoration: BoxDecoration(
+                            color: widget.headerColor,
+                            borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
+                          ),
+                          children: _buildHeaderCells(headerMap).map((cell) =>
+                              SizedBox(height: widget.headerHeight, child: cell)
+                          ).toList(),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: _buildTableBody(headerMap, tableWidth),
+                ),
+              ],
+            ),
+          );
+        }
     );
   }
+
 
   TableRow _buildTableRow(T item, Map<String, dynamic> headerMap) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
@@ -569,8 +637,8 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
             ),
           ),
           child: Checkbox(
-            value: widget.selectedItems?.length == widget.data.length,
-            onChanged: (value) {
+            value: widget.selectedItems?.length == widget.data.length && widget.data.isNotEmpty,
+            onChanged: widget.data.isEmpty ? null : (value) {
               if (value == true) {
                 for (var item in widget.data) {
                   widget.onSelectItem?.call(true, item);
@@ -587,39 +655,48 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     }
 
     for (final key in headerMap.keys) {
-      cells.add(Container(
-        height: widget.headerHeight,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Row(
-          children: [
-            Text(
-              key,
-              style: GoogleFonts.poppins(
-                color: _headerText,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            if (widget.isSort)
-              InkWell(
-                onTap: () => _handleSort(key, !_sortAscending),
-                child: Icon(
-                  _sortColumn == key
-                      ? _sortAscending
-                      ? Icons.arrow_upward
-                      : Icons.arrow_downward
-                      : Icons.sort,
+      // Use custom header builder if provided
+      if (widget.customHeaderBuilders?.containsKey(key) ?? false) {
+        cells.add(Container(
+          height: widget.headerHeight,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: widget.customHeaderBuilders![key]!(key),
+        ));
+      } else {
+        cells.add(Container(
+          height: widget.headerHeight,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              Text(
+                key,
+                style: GoogleFonts.poppins(
                   color: _headerText,
-                  size: 16,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
-          ],
-        ),
-      ));
+              if (widget.isSort && widget.data.isNotEmpty)
+                InkWell(
+                  onTap: () => _handleSort(key, !_sortAscending),
+                  child: Icon(
+                    _sortColumn == key
+                        ? _sortAscending
+                        ? Icons.arrow_upward
+                        : Icons.arrow_downward
+                        : Icons.sort,
+                    color: _headerText,
+                    size: 16,
+                  ),
+                ),
+            ],
+          ),
+        ));
+      }
     }
 
     cells.add(Container(
       height: widget.headerHeight,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 14),
       child: Center(
         child: Text(
           widget.actionColumnName ?? 'Actions',
@@ -682,7 +759,9 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       }
     }
 
-    totalWidth += 100; // Actions column
+    // Add action column width
+    totalWidth += (widget.actionColumnWidth ?? 100);
+
     return totalWidth;
   }
 
@@ -720,7 +799,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
           decoration: BoxDecoration(
             gradient: LinearGradient(
               colors: [
-                widget.headerColor.withOpacity(0.9),
+                widget.headerColor.withValues(alpha: 0.9),
                 widget.headerColor,
               ],
               begin: Alignment.topLeft,
@@ -729,7 +808,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
             borderRadius: BorderRadius.circular(6),
             boxShadow: [
               BoxShadow(
-                color: widget.headerColor.withOpacity(0.3),
+                color: widget.headerColor.withValues(alpha: 0.3),
                 spreadRadius: 1,
                 blurRadius: 3,
                 offset: const Offset(0, 1),
@@ -858,36 +937,153 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     // Create a list of possible values including the "All" option
     final List<dynamic> pageSizes = [5, 10, 25, 50, 100, allItemsValue];
 
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    // Make sure the dropdown color matches the container background exactly
+    final backgroundColor = isDarkMode ? Colors.grey.shade900 : Colors.white;
+    final borderColor = isDarkMode ? Colors.grey.shade700 : Colors.grey.shade300;
+    final textColor = isDarkMode ? Colors.white : Colors.grey.shade800;
+    final labelColor = isDarkMode ? Colors.grey.shade400 : Colors.grey.shade600;
+
+    // Fixed width for both the dropdown and its menu items
+    const double dropdownWidth = 80;
+
     return Container(
       height: 40,
+      width: dropdownWidth, // Fixed width for the dropdown
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: Colors.grey.shade300),
+        borderRadius: BorderRadius.circular(8),
+        color: backgroundColor,
+        border: Border.all(
+          color: borderColor,
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
-      child: DropdownButtonHideUnderline(
-        child: ButtonTheme(
-          alignedDropdown: true,
-          child: DropdownButton<dynamic>(
-            value: _pageSize == widget.totalItems ? allItemsValue : _pageSize,
-            items: pageSizes.map((dynamic value) {
-              return DropdownMenuItem<dynamic>(
-                value: value,
-                child: Text(
-                  value == allItemsValue ? 'All' : '$value',
-                  style: GoogleFonts.poppins(),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(7),
+        child: Material(
+          color: Colors.transparent,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Left accent bar
+              Container(
+                width: 4,
+                height: 40,
+                color: widget.headerColor,
+              ),
+
+              // Dropdown content
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 8, right: 2),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<dynamic>(
+                      isExpanded: true, // Make dropdown use all available space
+                      value: _pageSize == widget.totalItems ? allItemsValue : _pageSize,
+                      isDense: true,
+                      icon: Icon(
+                        Icons.arrow_drop_down,
+                        color: widget.headerColor,
+                        size: 20,
+                      ),
+                      iconSize: 20,
+                      underline: Container(),
+                      selectedItemBuilder: (context) {
+                        return pageSizes.map<Widget>((dynamic value) {
+                          return Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              value == allItemsValue ? "All" : "$value",
+                              style: GoogleFonts.poppins(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                                color: widget.headerColor,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          );
+                        }).toList();
+                      },
+                      elevation: 4,
+                      dropdownColor: backgroundColor, // Ensure dropdown matches background
+                      borderRadius: BorderRadius.circular(8),
+                      style: GoogleFonts.poppins(
+                        color: textColor,
+                        fontSize: 13,
+                      ),
+                      alignment: AlignmentDirectional.centerStart,
+                      menuMaxHeight: 305,
+                      // Using customized dropdown items to create compact layout
+                      items: pageSizes.map((dynamic value) {
+                        bool isSelected = _pageSize == value;
+                        return DropdownMenuItem<dynamic>(
+                          value: value,
+                          child: IntrinsicHeight(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                              constraints: const BoxConstraints(
+                                minHeight: 30, // This will make the item height more compact
+                                maxHeight: 30, // Ensure consistent height
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                mainAxisAlignment: MainAxisAlignment.start,
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  // Selection indicator dot
+                                  Container(
+                                    width: 6,
+                                    height: 6,
+                                    margin: const EdgeInsets.only(right: 6),
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: isSelected ? widget.headerColor : Colors.transparent,
+                                      border: isSelected
+                                          ? null
+                                          : Border.all(color: labelColor, width: 1),
+                                    ),
+                                  ),
+
+                                  // Item text
+                                  Expanded(
+                                    child: Text(
+                                      value == allItemsValue ? "All" : "$value",
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 13,
+                                        fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                                        color: isSelected ? widget.headerColor : textColor,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() {
+                            // If "All" is selected, set _pageSize to the total number of items
+                            _pageSize = (value == allItemsValue) ? widget.totalItems : value;
+                            _currentPage = 0;
+                          });
+                          widget.onPageChanged?.call(1, _pageSize);
+                        }
+                      },
+                    ),
+                  ),
                 ),
-              );
-            }).toList(),
-            onChanged: (value) {
-              if (value != null) {
-                setState(() {
-                  // If "All" is selected, set _pageSize to the total number of items
-                  _pageSize = (value == allItemsValue) ? widget.totalItems : value;
-                  _currentPage = 0;
-                });
-                widget.onPageChanged?.call(1, _pageSize);
-              }
-            },
+              ),
+            ],
           ),
         ),
       ),
@@ -895,12 +1091,8 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
   }
 
   Future<void> _exportToExcel() async {
-    try {
-      // Show progress indicator
-      if (mounted) {
-        _showProgressDialog('Generating Excel file...');
-      }
-
+    // We'll use _showProgressDialogWithTimeout to ensure the dialog is dismissed
+    await _showProgressDialogWithTimeout('Generating Excel file...', () async {
       final workbook = excel.Excel.createExcel();
       final sheet = workbook.sheets[workbook.getDefaultSheet() ?? 'Sheet1'];
       if (sheet == null) throw Exception('Failed to create sheet');
@@ -1002,28 +1194,15 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       final excelData = workbook.encode();
       if (excelData == null) throw Exception('Failed to save Excel file');
 
-      // Close progress dialog
-      if (mounted && Navigator.of(context).canPop()) {
-        Navigator.of(context).pop();
-      }
-
+      // Save the file - no need to dismiss dialog here as _showProgressDialogWithTimeout handles it
       await _saveFile(excelData, '${widget.fileName}.xlsx');
-    } catch (e) {
-      // Close progress dialog if open
-      if (mounted && Navigator.of(context).canPop()) {
-        Navigator.of(context).pop();
-      }
-      _showErrorDialog('Export Error', e.toString());
-    }
+    });
   }
 
+// Updated _exportToPdf method with robust dialog handling
   Future<void> _exportToPdf() async {
-    try {
-      // Show progress indicator
-      if (mounted) {
-        _showProgressDialog('Generating PDF file...');
-      }
-
+    // We'll use _showProgressDialogWithTimeout to ensure the dialog is dismissed
+    await _showProgressDialogWithTimeout('Generating PDF file...', () async {
       final pdf = pw.Document();
       final headerMap = widget.toTableDataMap(_filteredData.first);
 
@@ -1059,37 +1238,444 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
 
       final bytes = await pdf.save();
 
-      // Close progress dialog
-      if (mounted && Navigator.of(context).canPop()) {
-        Navigator.of(context).pop();
+      // Save the file - no need to dismiss dialog here as _showProgressDialogWithTimeout handles it
+      await _saveFile(bytes, '${widget.fileName}.pdf');
+    });
+  }
+
+  Future<void> _showProgressDialogWithTimeout(String message, Future<void> Function() operation) async {
+    // Keep track of whether we need to dismiss the dialog
+    bool needToDismiss = true;
+    bool operationComplete = false;
+
+    // Show the dialog
+    if (mounted) {
+      _showProgressDialog(message);
+    }
+
+    // Setup a timeout to ensure the dialog is dismissed
+    Timer? timeoutTimer;
+    timeoutTimer = Timer(const Duration(seconds: 15), () {
+      if (needToDismiss && mounted && !operationComplete) {
+        print("Operation timeout - forcing dialog dismissal");
+        _dismissDialog();
+        needToDismiss = false;
+
+        // Show a message that the operation continues in background
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Export operation continues in the background...'),
+              backgroundColor: widget.headerColor,
+              duration: const Duration(seconds: 5),
+            ),
+          );
+        }
+      }
+    });
+
+    try {
+      // Run the operation
+      await operation();
+      operationComplete = true;
+
+      // Cancel the timeout timer
+      timeoutTimer.cancel();
+
+      // Dismiss the dialog if needed
+      if (needToDismiss && mounted) {
+        // Add a small delay to ensure UI updates properly
+        await Future.delayed(const Duration(milliseconds: 500));
+        _dismissDialog();
+        needToDismiss = false;
       }
 
-      await _saveFile(bytes, '${widget.fileName}.pdf');
-    } catch (e) {
-      // Close progress dialog if open
-      if (mounted && Navigator.of(context).canPop()) {
-        Navigator.of(context).pop();
+      // Show success message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('File exported successfully'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+          ),
+        );
       }
-      _showErrorDialog('PDF Export Error', e.toString());
+    } catch (e) {
+      operationComplete = true;
+
+      // Cancel the timeout timer
+      timeoutTimer.cancel();
+
+      // Dismiss the dialog if needed
+      if (needToDismiss && mounted) {
+        _dismissDialog();
+        needToDismiss = false;
+      }
+
+      // Show error dialog
+      _showErrorDialog('Export Error', e.toString());
     }
   }
 
+// 4. Improved dialog dismissal method with multiple fallbacks
+  void _dismissDialog() {
+    if (!mounted) return;
+
+    // Try multiple approaches to ensure the dialog is dismissed
+    try {
+      // Approach 1: Standard Navigator
+      if (Navigator.of(context, rootNavigator: true).canPop()) {
+        print("Dismissing dialog with rootNavigator");
+        Navigator.of(context, rootNavigator: true).pop();
+        return;
+      }
+    } catch (e) {
+      print("Standard Navigator dismissal failed: $e");
+    }
+
+    try {
+      // Approach 2: Basic Navigator
+      if (Navigator.of(context).canPop()) {
+        print("Dismissing dialog with basic Navigator");
+        Navigator.of(context).pop();
+        return;
+      }
+    } catch (e) {
+      print("Basic Navigator dismissal failed: $e");
+    }
+
+    try {
+      // Approach 3: Direct pop
+      if (Navigator.canPop(context)) {
+        print("Dismissing dialog with direct pop");
+        Navigator.pop(context);
+        return;
+      }
+    } catch (e) {
+      print("Direct pop dismissal failed: $e");
+    }
+
+    // If we get here, all approaches failed
+    print("Warning: Could not dismiss dialog through normal means");
+  }
+
+// Keep track of whether a dialog is showing to prevent multiple dialogs
+  bool _isDialogShowing = false;
+
+// Modified progress dialog with better state tracking
   void _showProgressDialog(String message) {
+    // Prevent multiple dialogs
+    if (_isDialogShowing) return;
+    _isDialogShowing = true;
+
+    // Use a GlobalKey to get access to the dialog's context more reliably
+    final GlobalKey<State> dialogKey = GlobalKey<State>();
+
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const CircularProgressIndicator(),
-              const SizedBox(height: 16),
-              Text(message),
-            ],
+      builder: (BuildContext dialogContext) {
+        return PopScope(
+          canPop: false, // Prevent back button dismissal
+          child: Dialog(
+            key: dialogKey,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16.0),
+            ),
+            elevation: 8,
+            backgroundColor: Theme.of(context).brightness == Brightness.dark
+                ? Colors.grey.shade900
+                : Colors.white,
+            child: Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16.0),
+                border: Border.all(
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? Colors.grey.shade800
+                      : Colors.grey.shade300,
+                  width: 1,
+                ),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 72,
+                    height: 72,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: widget.headerColor.withValues(alpha: 0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: CircularProgressIndicator(
+                      valueColor: AlwaysStoppedAnimation<Color>(widget.headerColor),
+                      strokeWidth: 3,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    message,
+                    style: GoogleFonts.poppins(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.white
+                          : Colors.grey.shade800,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Please wait while we prepare your file...',
+                    style: GoogleFonts.poppins(
+                      fontSize: 14,
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.grey.shade400
+                          : Colors.grey.shade600,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                ],
+              ),
+            ),
           ),
         );
       },
+    ).then((_) {
+      // Reset dialog state when closed
+      _isDialogShowing = false;
+    });
+  }
+
+// Enhanced success dialog with premium UI
+  void _showSuccessDialog(String title, Map<String, String> details) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16.0),
+        ),
+        elevation: 8,
+        backgroundColor: Theme.of(context).brightness == Brightness.dark
+            ? Colors.grey.shade900
+            : Colors.white,
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16.0),
+            border: Border.all(
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? Colors.grey.shade800
+                  : Colors.grey.shade300,
+              width: 1,
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  color: Colors.green.shade50,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.check_circle_rounded,
+                  color: Colors.green.shade600,
+                  size: 40,
+                ),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                title,
+                style: GoogleFonts.poppins(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.green.shade700,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? Colors.grey.shade800
+                      : Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? Colors.grey.shade700
+                        : Colors.grey.shade300,
+                    width: 1,
+                  ),
+                ),
+                child: Column(
+                  children: details.entries.map((entry) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${entry.key}:',
+                          style: GoogleFonts.poppins(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                            color: Theme.of(context).brightness == Brightness.dark
+                                ? Colors.grey.shade300
+                                : Colors.grey.shade800,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            entry.value,
+                            style: GoogleFonts.poppins(
+                              fontSize: 14,
+                              color: Theme.of(context).brightness == Brightness.dark
+                                  ? Colors.grey.shade400
+                                  : Colors.grey.shade700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )).toList(),
+                ),
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: widget.headerColor,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  elevation: 2,
+                ),
+                child: Text(
+                  'Done',
+                  style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.w500,
+                    fontSize: 16,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+// Enhanced error dialog with premium UI
+  void _showErrorDialog(String title, String message) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16.0),
+        ),
+        elevation: 8,
+        backgroundColor: Theme.of(context).brightness == Brightness.dark
+            ? Colors.grey.shade900
+            : Colors.white,
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16.0),
+            border: Border.all(
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? Colors.grey.shade800
+                  : Colors.grey.shade300,
+              width: 1,
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.error_rounded,
+                  color: Colors.red.shade600,
+                  size: 40,
+                ),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                title,
+                style: GoogleFonts.poppins(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.red.shade700,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              Container(
+                constraints: BoxConstraints(
+                  maxHeight: 200,
+                ),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? Colors.grey.shade800
+                      : Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? Colors.grey.shade700
+                        : Colors.grey.shade300,
+                    width: 1,
+                  ),
+                ),
+                child: SingleChildScrollView(
+                  child: Text(
+                    message,
+                    style: GoogleFonts.poppins(
+                      fontSize: 14,
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.grey.shade400
+                          : Colors.grey.shade700,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: widget.headerColor,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  elevation: 2,
+                ),
+                child: Text(
+                  'Close',
+                  style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.w500,
+                    fontSize: 16,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -1200,176 +1786,6 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
         _showErrorDialog('Error Saving to Downloads', e.toString());
       }
     }
-  }
-
-  void _showExportOptionsDialog(String filePath, String fileName) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(Icons.file_download_done, color: Colors.green),
-            SizedBox(width: 8),
-            Text('File Saved'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Your file has been saved to:'),
-            SizedBox(height: 8),
-            Container(
-              padding: EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade100,
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text(
-                filePath,
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-            ),
-            SizedBox(height: 16),
-            Text('What would you like to do next?'),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-            },
-            child: Text('Close'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.of(context).pop();
-              try {
-                await Share.shareXFiles(
-                  [XFile(filePath)],
-                  subject: 'Exported File',
-                  text: 'Here is your exported data',
-                );
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Unable to share file: ${e.toString()}'),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                }
-              }
-            },
-            child: Text('Share'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: widget.headerColor,
-              foregroundColor: Colors.white,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showErrorDialog(String title, String message) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          title,
-          style: GoogleFonts.poppins(
-            fontWeight: FontWeight.w600,
-            color: Colors.red.shade700,
-          ),
-        ),
-        content: SingleChildScrollView(
-          child: Text(
-            message,
-            style: GoogleFonts.poppins(
-              color: Colors.black87,
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text(
-              'OK',
-              style: GoogleFonts.poppins(
-                color: widget.headerColor,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showSuccessDialog(String title, Map<String, String> details) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(
-              Icons.check_circle,
-              color: Colors.green.shade600,
-              size: 24,
-            ),
-            const SizedBox(width: 8),
-            Text(
-              title,
-              style: GoogleFonts.poppins(
-                fontWeight: FontWeight.w600,
-                color: Colors.green.shade700,
-              ),
-            ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: details.entries.map((entry) => Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${entry.key}:',
-                  style: GoogleFonts.poppins(
-                    fontWeight: FontWeight.w500,
-                    color: Colors.black87,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    entry.value,
-                    style: GoogleFonts.poppins(
-                      color: Colors.black54,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          )).toList(),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text(
-              'OK',
-              style: GoogleFonts.poppins(
-                color: widget.headerColor,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
   }
 
   @override
