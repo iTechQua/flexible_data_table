@@ -1,3 +1,13 @@
+## [1.0.5] - 2025-04-17
+
+### Updated
+- This version updated card color
+
+## [1.0.4] - 2025-04-17
+
+### Updated
+- This version added card color
+
 ## [1.0.3] - 2025-03-31
 
 ### Updated

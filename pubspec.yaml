@@ -1,6 +1,6 @@
 name: flexible_data_table
 description: "This package supports server-side datatables, which can significantly enhance performance when dealing with large datasets by offloading data processing to the server. #Datatabel #ServerSideDatatable"
-version: 1.0.3
+version: 1.0.5
 
 #homepage: https://iTechQua.github.io
 repository: https://github.com/iTechQua/flexible_data_table

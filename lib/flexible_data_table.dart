@@ -30,6 +30,7 @@ class FlexibleDataTable<T> extends StatefulWidget {
   final Map<String, Widget Function(String columnName)>? customHeaderBuilders;
   final double? minWidth;
   final Color headerColor;
+  final Color? cardColor;
   final double rowHeight;
   final double headerHeight;
   final String? actionColumnName;
@@ -65,6 +66,7 @@ class FlexibleDataTable<T> extends StatefulWidget {
     this.heading,
     this.loader,
     this.headerColor = const Color(0xFF6D28D9),
+    this.cardColor,
     this.rowHeight = 50,
     this.headerHeight = 50,
     this.pageSize = 10,
@@ -454,7 +456,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
 
     return Card(
       elevation: 0,
-      color: isDarkMode ? Colors.grey[850] : Theme.of(context).cardColor,
+      color: widget.cardColor ?? (isDarkMode ? Colors.grey[850] : Colors.white),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16.0),
         side: BorderSide(color: isDarkMode ? Colors.grey[700]! : Colors.grey.shade200),
