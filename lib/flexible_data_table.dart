@@ -44,6 +44,8 @@ class FlexibleDataTable<T> extends StatefulWidget {
   final Function(int page, int pageSize)? onPageChanged;
   final int totalItems;
   final bool isServerSide;
+  // Add new headers parameter
+  final Map<String, dynamic>? headers;
 
   const FlexibleDataTable({
     super.key,
@@ -78,6 +80,7 @@ class FlexibleDataTable<T> extends StatefulWidget {
     this.onPageChanged,
     this.totalItems = 0,
     this.isServerSide = false,
+    this.headers,
   });
 
   @override
@@ -97,6 +100,8 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
   final ScrollController _horizontalScrollController = ScrollController();
   final ScrollController _verticalScrollController = ScrollController();
   final ScrollController _headerScrollController = ScrollController();
+
+  Map<String, dynamic>? _defaultHeaderMap;
 
   Color get _headerText => widget.headerTextColor ??
       (Theme.of(context).brightness == Brightness.dark ? Colors.white : Colors.white);
@@ -131,10 +136,16 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     }
     return statuses.values.every((status) => status.isGranted);
   }
-  Map<String, dynamic>? _defaultHeaderMap;
 
-// Add this method to set default headers from the first non-empty data
+  // Modified to use explicit headers from widget if available
   void _updateDefaultHeaderMap() {
+    // If explicit headers are provided, use them
+    if (widget.headers != null && widget.headers!.isNotEmpty) {
+      _defaultHeaderMap = Map<String, dynamic>.from(widget.headers!);
+      return;
+    }
+
+    // Otherwise try to derive headers from data
     if (_defaultHeaderMap == null || _defaultHeaderMap!.isEmpty) {
       if (widget.data.isNotEmpty) {
         _defaultHeaderMap = Map<String, dynamic>.from(widget.toTableDataMap(widget.data.first));
@@ -150,7 +161,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     _pageSize = widget.pageSize;
     _setupScrollControllers();
     _updateEffectiveTotalItems();
-    _updateDefaultHeaderMap(); // Add this line
+    _updateDefaultHeaderMap();
   }
 
   void _updateEffectiveTotalItems() {
@@ -162,7 +173,9 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
   @override
   void didUpdateWidget(FlexibleDataTable<T> oldWidget) {
     super.didUpdateWidget(oldWidget);
-    _updateDefaultHeaderMap(); // Add this line
+
+    // Always update the header map when widget updates
+    _updateDefaultHeaderMap();
 
     if (oldWidget.data != widget.data) {
       setState(() {
@@ -485,10 +498,15 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
 
     // Determine header map with a preference order
+    // Modified to prioritize explicit headers over derived headers
     Map<String, dynamic> headerMap;
 
-    // First try to use the current data
-    if (widget.data.isNotEmpty) {
+    // First try to use explicitly provided headers
+    if (widget.headers != null && widget.headers!.isNotEmpty) {
+      headerMap = Map<String, dynamic>.from(widget.headers!);
+    }
+    // Then try to use the current data
+    else if (widget.data.isNotEmpty) {
       headerMap = Map<String, dynamic>.from(widget.toTableDataMap(widget.data.first));
     }
     // Then try to use our cached default header map
@@ -778,6 +796,8 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       ],
     );
   }
+
+  // Continuing from where we left off
 
   Widget _buildExportButton() {
     return Theme(
@@ -1105,7 +1125,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       }
 
       // Add headers with merged cells for better visibility
-      final headerMap = widget.toTableDataMap(_filteredData.first);
+      final headerMap = _getHeaderMap();
       var columnIndex = 0;
 
       // Add S.No header
@@ -1166,7 +1186,8 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
 
         // Add row data
         final rowData = widget.toTableDataMap(_filteredData[i]);
-        for (final value in rowData.values) {
+        for (final key in headerMap.keys) {
+          final value = rowData[key];
           final cellValue = value?.toString() ?? '';
           final cell = sheet.cell(excel.CellIndex.indexByColumnRow(
             columnIndex: columnIndex,
@@ -1201,12 +1222,40 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     });
   }
 
+  // Add a helper method to get header map consistently
+  Map<String, dynamic> _getHeaderMap() {
+    // First try to use explicitly provided headers
+    if (widget.headers != null && widget.headers!.isNotEmpty) {
+      return Map<String, dynamic>.from(widget.headers!);
+    }
+    // Then try to use the current data
+    else if (widget.data.isNotEmpty) {
+      return Map<String, dynamic>.from(widget.toTableDataMap(widget.data.first));
+    }
+    // Then try to use our cached default header map
+    else if (_defaultHeaderMap != null && _defaultHeaderMap!.isNotEmpty) {
+      return _defaultHeaderMap!;
+    }
+    // Then try to use custom header builders
+    else if (widget.customHeaderBuilders != null && widget.customHeaderBuilders!.isNotEmpty) {
+      return Map<String, dynamic>.fromIterable(
+          widget.customHeaderBuilders!.keys,
+          value: (_) => null
+      );
+    }
+    // As a last resort, provide at least some default headers
+    else {
+      // Create basic placeholder headers if we have absolutely nothing else
+      return {'ID': null, 'Name': null, 'Description': null};
+    }
+  }
+
 // Updated _exportToPdf method with robust dialog handling
   Future<void> _exportToPdf() async {
     // We'll use _showProgressDialogWithTimeout to ensure the dialog is dismissed
     await _showProgressDialogWithTimeout('Generating PDF file...', () async {
       final pdf = pw.Document();
-      final headerMap = widget.toTableDataMap(_filteredData.first);
+      final headerMap = _getHeaderMap();
 
       pdf.addPage(
         pw.MultiPage(
@@ -1218,7 +1267,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                 final map = widget.toTableDataMap(entry.value);
                 return [
                   (entry.key + 1).toString(),
-                  ...map.values.map((e) => e?.toString() ?? '').toList()
+                  ...headerMap.keys.map((key) => map[key]?.toString() ?? '').toList()
                 ];
               }).toList(),
               headerStyle: pw.TextStyle(
@@ -1576,6 +1625,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
   }
 
 // Enhanced error dialog with premium UI
+  // Continuing the _showErrorDialog method
   void _showErrorDialog(String title, String message) {
     showDialog(
       context: context,

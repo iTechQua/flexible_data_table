@@ -1,3 +1,8 @@
+## [1.0.6] - 2025-05-1
+
+### Updated
+- This version added new parameter headers for empty list
+
 ## [1.0.5] - 2025-04-17
 
 ### Updated
