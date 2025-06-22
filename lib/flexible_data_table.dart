@@ -12,6 +12,17 @@ import 'package:share_plus/share_plus.dart';
 import 'package:universal_html/html.dart' as html;
 import 'package:excel/excel.dart' as excel;
 
+// Enum for different table types
+enum FlexibleDataTableType {
+  standard,     // Default clean style (no borders)
+  bordered,     // Full borders around all cells
+  striped,      // Alternating row colors
+  card,         // Each row as a card
+  compact,      // Reduced padding and spacing
+  modern,       // Premium look with gradients and shadows
+  minimal       // Ultra-minimal with only bottom lines
+}
+
 class FlexibleDataTable<T> extends StatefulWidget {
   final List<T> data;
   final String fileName;
@@ -29,10 +40,12 @@ class FlexibleDataTable<T> extends StatefulWidget {
   final Function(bool?, T)? onSelectItem;
   final Map<String, Widget Function(String columnName)>? customHeaderBuilders;
   final double? minWidth;
+  final Color primaryColor;
   final Color headerColor;
   final Color? cardColor;
   final double rowHeight;
   final double headerHeight;
+  final double headerFontSize;
   final String? actionColumnName;
   final double? actionColumnWidth;
   final int? actionColumnFlex;
@@ -44,8 +57,16 @@ class FlexibleDataTable<T> extends StatefulWidget {
   final Function(int page, int pageSize)? onPageChanged;
   final int totalItems;
   final bool isServerSide;
-  // Add new headers parameter
   final Map<String, dynamic>? headers;
+
+  // New table type functionality
+  final FlexibleDataTableType tableType;
+  final Color? stripedRowColor;
+  final double? cardElevation;
+  final double? cardMargin;
+  final BorderRadius? cardBorderRadius;
+  final Color? cardShadowColor;
+  final bool showTableTypeSelector;
 
   const FlexibleDataTable({
     super.key,
@@ -67,10 +88,12 @@ class FlexibleDataTable<T> extends StatefulWidget {
     this.minWidth,
     this.heading,
     this.loader,
-    this.headerColor = const Color(0xFF6D28D9),
+    this.primaryColor = const Color(0xFF6D28D9),
+    this.headerColor = const Color(0xFFF6F8FF),
     this.cardColor,
     this.rowHeight = 50,
     this.headerHeight = 50,
+    this.headerFontSize = 12,
     this.pageSize = 10,
     this.actionColumnFlex,
     this.headerTextColor,
@@ -81,6 +104,15 @@ class FlexibleDataTable<T> extends StatefulWidget {
     this.totalItems = 0,
     this.isServerSide = false,
     this.headers,
+
+    // New table type parameters
+    this.tableType = FlexibleDataTableType.standard,
+    this.stripedRowColor,
+    this.cardElevation,
+    this.cardMargin,
+    this.cardBorderRadius,
+    this.cardShadowColor,
+    this.showTableTypeSelector = false,
   });
 
   @override
@@ -96,6 +128,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
   int _pageSize = 10;
   String _searchQuery = '';
   late int _effectiveTotalItems;
+  late FlexibleDataTableType _currentTableType;
 
   final ScrollController _horizontalScrollController = ScrollController();
   final ScrollController _verticalScrollController = ScrollController();
@@ -104,7 +137,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
   Map<String, dynamic>? _defaultHeaderMap;
 
   Color get _headerText => widget.headerTextColor ??
-      (Theme.of(context).brightness == Brightness.dark ? Colors.white : Colors.white);
+      (Theme.of(context).brightness == Brightness.dark ? Colors.white : Colors.black87);
 
   Color get _rowText => widget.rowTextColor ??
       (Theme.of(context).brightness == Brightness.dark ? Colors.white : Colors.black87);
@@ -114,6 +147,9 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
 
   Color get _checkboxColor => widget.checkboxColor ??
       (Theme.of(context).brightness == Brightness.dark ? Colors.white70 : Colors.white);
+
+  Color get _stripedColor => widget.stripedRowColor ??
+      (Theme.of(context).brightness == Brightness.dark ? Colors.grey.shade800 : Colors.grey.shade50);
 
   Future<bool> checkPermissions() async {
     final Map<Permission, PermissionStatus> statuses = await [
@@ -137,15 +173,12 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     return statuses.values.every((status) => status.isGranted);
   }
 
-  // Modified to use explicit headers from widget if available
   void _updateDefaultHeaderMap() {
-    // If explicit headers are provided, use them
     if (widget.headers != null && widget.headers!.isNotEmpty) {
       _defaultHeaderMap = Map<String, dynamic>.from(widget.headers!);
       return;
     }
 
-    // Otherwise try to derive headers from data
     if (_defaultHeaderMap == null || _defaultHeaderMap!.isEmpty) {
       if (widget.data.isNotEmpty) {
         _defaultHeaderMap = Map<String, dynamic>.from(widget.toTableDataMap(widget.data.first));
@@ -159,6 +192,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     _searchController = TextEditingController();
     _filteredData = List.from(widget.data);
     _pageSize = widget.pageSize;
+    _currentTableType = widget.tableType;
     _setupScrollControllers();
     _updateEffectiveTotalItems();
     _updateDefaultHeaderMap();
@@ -174,7 +208,6 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
   void didUpdateWidget(FlexibleDataTable<T> oldWidget) {
     super.didUpdateWidget(oldWidget);
 
-    // Always update the header map when widget updates
     _updateDefaultHeaderMap();
 
     if (oldWidget.data != widget.data) {
@@ -192,63 +225,91 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
         _updateEffectiveTotalItems();
       });
     }
+
+    if (oldWidget.tableType != widget.tableType) {
+      setState(() {
+        _currentTableType = widget.tableType;
+      });
+    }
   }
 
-  // Update _buildTableBody to use pagination based on isServerSide
+  // Get table-specific styling based on table type
+  TableBorder? _getTableBorder() {
+    switch (_currentTableType) {
+      case FlexibleDataTableType.bordered:
+        return TableBorder.all(color: _border, width: 1);
+      case FlexibleDataTableType.card:
+      case FlexibleDataTableType.standard:
+        return null; // No borders for these types
+      case FlexibleDataTableType.minimal:
+        return null; // Minimal uses only row bottom borders
+      case FlexibleDataTableType.modern:
+        return TableBorder(
+          horizontalInside: BorderSide(color: _border.withValues(alpha: 0.1), width: 1),
+        );
+      case FlexibleDataTableType.striped:
+      case FlexibleDataTableType.compact:
+        return TableBorder(
+          horizontalInside: BorderSide(color: _border.withValues(alpha: 0.5)),
+        );
+      default:
+        return null;
+    }
+  }
+
+  EdgeInsets _getCellPadding() {
+    switch (_currentTableType) {
+      case FlexibleDataTableType.compact:
+        return const EdgeInsets.symmetric(horizontal: 8, vertical: 4);
+      case FlexibleDataTableType.card:
+        return const EdgeInsets.symmetric(horizontal: 12, vertical: 6);
+      default:
+        return const EdgeInsets.symmetric(horizontal: 16, vertical: 8);
+    }
+  }
+
+  double _getRowHeight() {
+    switch (_currentTableType) {
+      case FlexibleDataTableType.compact:
+        return widget.rowHeight * 0.8;
+      case FlexibleDataTableType.card:
+        return widget.rowHeight * 1.2;
+      default:
+        return widget.rowHeight;
+    }
+  }
+
+  Color? _getRowColor(int index, bool isDarkMode) {
+    switch (_currentTableType) {
+      case FlexibleDataTableType.striped:
+        return index % 2 == 0
+            ? (isDarkMode ? Colors.grey[850] : Colors.white)
+            : _stripedColor;
+      case FlexibleDataTableType.card:
+        return null; // Cards handle their own color
+      case FlexibleDataTableType.minimal:
+        return Colors.transparent; // Minimal uses transparent rows
+      case FlexibleDataTableType.standard:
+        return isDarkMode ? Colors.grey[900] : Colors.white;
+      case FlexibleDataTableType.modern:
+      // Modern: Subtle gradient-like alternating colors
+        return index % 2 == 0
+            ? (isDarkMode ? Colors.grey[850]!.withValues(alpha: 0.7) : Colors.white.withValues(alpha: 0.9))
+            : (isDarkMode ? Colors.grey[800]!.withValues(alpha: 0.5) : Colors.grey.shade50.withValues(alpha: 0.8));
+      case FlexibleDataTableType.compact:
+        return isDarkMode ? Colors.grey[850] : Colors.white;
+      case FlexibleDataTableType.bordered:
+        return isDarkMode ? Colors.grey[850] : Colors.white;
+      default:
+        return isDarkMode ? Colors.grey[850] : Colors.white;
+    }
+  }
+
   Widget _buildTableBody(Map<String, dynamic> headerMap, double tableWidth) {
     if (_filteredData.isEmpty) {
-      // Create a single empty row to show under the headers
-      final List<Widget> emptyCells = [];
-
-      // Add checkbox cell if needed
-      if (widget.showCheckboxColumn) {
-        emptyCells.add(Container(height: 100));
-      }
-
-      // Add cells for each header column
-      for (int i = 0; i < headerMap.length; i++) {
-        emptyCells.add(Container(height: 100));
-      }
-
-      // Add action column cell
-      emptyCells.add(Container(height: 100));
-
-      return Stack(
-        children: [
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            controller: _horizontalScrollController,
-            child: SizedBox(
-              width: tableWidth,
-              child: Table(
-                defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-                columnWidths: _buildColumnWidths(headerMap),
-                border: TableBorder(
-                  horizontalInside: BorderSide(color: _border),
-                  verticalInside: BorderSide(color: _border),
-                ),
-                children: [
-                  TableRow(
-                    children: emptyCells,
-                  ),
-                ],
-              ),
-            ),
-          ),
-          Center(
-            child: Text(
-              _searchQuery.isEmpty ? 'No data available' : 'No matching records found',
-              style: GoogleFonts.poppins(
-                fontSize: 14,
-                color: _rowText,
-              ),
-            ),
-          ),
-        ],
-      );
+      return _buildEmptyState(headerMap, tableWidth);
     }
 
-    // Normal table with data
     final startIndex = widget.isServerSide ? 0 : _currentPage * _pageSize;
     final endIndex = widget.isServerSide
         ? _filteredData.length
@@ -257,6 +318,10 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     final pageData = widget.isServerSide
         ? _filteredData
         : _filteredData.sublist(startIndex, endIndex);
+
+    if (_currentTableType == FlexibleDataTableType.card) {
+      return _buildCardTableBody(pageData, headerMap);
+    }
 
     return SingleChildScrollView(
       controller: _verticalScrollController,
@@ -267,19 +332,183 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
           width: tableWidth,
           child: Table(
             defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-            border: TableBorder(
-              horizontalInside: BorderSide(color: _border),
-              verticalInside: BorderSide(color: _border),
-            ),
+            border: _getTableBorder(),
             columnWidths: _buildColumnWidths(headerMap),
-            children: pageData.map((item) => _buildTableRow(item, headerMap)).toList(),
+            children: pageData.asMap().entries.map((entry) =>
+                _buildTableRow(entry.value, headerMap, entry.key)).toList(),
           ),
         ),
       ),
     );
   }
 
-  // Update pagination calculations
+  Widget _buildEmptyState(Map<String, dynamic> headerMap, double tableWidth) {
+    final List<Widget> emptyCells = [];
+
+    if (widget.showCheckboxColumn) {
+      emptyCells.add(Container(height: 100));
+    }
+
+    for (int i = 0; i < headerMap.length; i++) {
+      emptyCells.add(Container(height: 100));
+    }
+
+    emptyCells.add(Container(height: 100));
+
+    return Stack(
+      children: [
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          controller: _horizontalScrollController,
+          child: SizedBox(
+            width: tableWidth,
+            child: Table(
+              defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+              columnWidths: _buildColumnWidths(headerMap),
+              border: _getTableBorder(),
+              children: [
+                TableRow(children: emptyCells),
+              ],
+            ),
+          ),
+        ),
+        Center(
+          child: Text(
+            _searchQuery.isEmpty ? 'No data available' : 'No matching records found',
+            style: GoogleFonts.poppins(
+              fontSize: 14,
+              color: _rowText,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCardTableBody(List<T> pageData, Map<String, dynamic> headerMap) {
+    return SingleChildScrollView(
+      controller: _verticalScrollController,
+      child: Column(
+        children: pageData.asMap().entries.map((entry) =>
+            _buildCardRow(entry.value, headerMap, entry.key)).toList(),
+      ),
+    );
+  }
+
+  Widget _buildCardRow(T item, Map<String, dynamic> headerMap, int index) {
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    final map = widget.toTableDataMap(item);
+
+    return Container(
+      margin: EdgeInsets.all(widget.cardMargin ?? 8),
+      child: Card(
+        elevation: widget.cardElevation ?? 3,
+        shadowColor: widget.cardShadowColor ?? Colors.grey.shade300,
+        shape: RoundedRectangleBorder(
+          borderRadius: widget.cardBorderRadius ?? BorderRadius.circular(12),
+        ),
+        color: widget.cardColor ?? (isDarkMode ? Colors.grey[850] : Colors.white),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Card header with index
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: widget.primaryColor.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'Item ${index + 1}',
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: widget.primaryColor,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // Checkbox row if enabled
+              if (widget.showCheckboxColumn) ...[
+                Row(
+                  children: [
+                    Checkbox(
+                      value: widget.selectedItems?.contains(item) ?? false,
+                      onChanged: (value) => widget.onSelectItem?.call(value, item),
+                    ),
+                    Text(
+                      'Select Item',
+                      style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        color: _rowText.withValues(alpha: 0.7),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+              ],
+
+              // Data rows
+              ...headerMap.keys.map((key) {
+                final value = map[key];
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(
+                        width: 120,
+                        child: Text(
+                          '$key:',
+                          style: GoogleFonts.poppins(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: _rowText.withValues(alpha: 0.8),
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: widget.cellBuilders?.containsKey(key) ?? false
+                            ? widget.cellBuilders![key]!(value, item)
+                            : Text(
+                          value?.toString() ?? '',
+                          style: GoogleFonts.poppins(
+                            fontSize: 13,
+                            color: _rowText,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+
+              // Actions row
+              ...[
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                height: 1,
+                color: _border.withValues(alpha: 0.3),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  widget.actionBuilder(item),
+                ],
+              ),
+            ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildPagination() {
     final totalPages = (_effectiveTotalItems / _pageSize).ceil();
     final startEntry = _currentPage * _pageSize + 1;
@@ -327,7 +556,6 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     );
   }
 
-  // Update _filterData to handle server-side vs local filtering
   void _filterData(String query) {
     setState(() {
       _searchQuery = query.toLowerCase();
@@ -341,7 +569,6 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       if (_searchQuery.isNotEmpty) {
         _currentPage = 0;
       } else {
-        // Calculate last page when clearing search
         int totalPages = (widget.isServerSide ? widget.totalItems : widget.data.length) ~/ _pageSize;
         if ((widget.isServerSide ? widget.totalItems : widget.data.length) % _pageSize != 0) {
           totalPages += 1;
@@ -357,7 +584,6 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     });
   }
 
-  // Update _changePage to handle server-side vs local pagination
   void _changePage(int page) {
     setState(() => _currentPage = page);
 
@@ -377,13 +603,11 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
 
         if (aValue == null || bValue == null) return 0;
 
-        // Handle numeric sorting
         if (aValue is num && bValue is num) {
           final comparison = aValue.compareTo(bValue);
           return ascending ? comparison : -comparison;
         }
 
-        // Handle date sorting
         final aDate = DateTime.tryParse(aValue.toString());
         final bDate = DateTime.tryParse(bValue.toString());
         if (aDate != null && bDate != null) {
@@ -391,7 +615,6 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
           return ascending ? comparison : -comparison;
         }
 
-        // Default string sorting
         final comparison = aValue.toString().compareTo(bValue.toString());
         return ascending ? comparison : -comparison;
       });
@@ -411,6 +634,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       }
     });
   }
+
   String? _getValidationError() {
     if (!widget.isServerSide) return null;
 
@@ -419,6 +643,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     }
     return null;
   }
+
   Widget _buildErrorDisplay(String message) {
     return Card(
       elevation: 0,
@@ -468,14 +693,19 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
 
     return Card(
-      elevation: 0,
+      elevation: _currentTableType == FlexibleDataTableType.modern ? 4 : 0,
+      shadowColor: _currentTableType == FlexibleDataTableType.modern ? widget.cardShadowColor : null,
       color: widget.cardColor ?? (isDarkMode ? Colors.grey[850] : Colors.white),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16.0),
-        side: BorderSide(color: isDarkMode ? Colors.grey[700]! : Colors.grey.shade200),
+        borderRadius: BorderRadius.circular(_currentTableType == FlexibleDataTableType.modern ? 16.0 : 16.0),
+        side: BorderSide(
+            color: _currentTableType == FlexibleDataTableType.standard
+                ? Colors.transparent
+                : (isDarkMode ? Colors.grey[700]! : Colors.grey.shade200)
+        ),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: EdgeInsets.all(_currentTableType == FlexibleDataTableType.compact ? 12.0 : 16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -497,58 +727,52 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
   Widget _buildTable() {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
 
-    // Determine header map with a preference order
-    // Modified to prioritize explicit headers over derived headers
     Map<String, dynamic> headerMap;
 
-    // First try to use explicitly provided headers
     if (widget.headers != null && widget.headers!.isNotEmpty) {
       headerMap = Map<String, dynamic>.from(widget.headers!);
     }
-    // Then try to use the current data
     else if (widget.data.isNotEmpty) {
       headerMap = Map<String, dynamic>.from(widget.toTableDataMap(widget.data.first));
     }
-    // Then try to use our cached default header map
     else if (_defaultHeaderMap != null && _defaultHeaderMap!.isNotEmpty) {
       headerMap = _defaultHeaderMap!;
     }
-    // Then try to use custom header builders
     else if (widget.customHeaderBuilders != null && widget.customHeaderBuilders!.isNotEmpty) {
       headerMap = Map<String, dynamic>.fromIterable(
           widget.customHeaderBuilders!.keys,
           value: (_) => null
       );
     }
-    // As a last resort, provide at least some default headers
     else {
-      // Create basic placeholder headers if we have absolutely nothing else
       headerMap = {'ID': null, 'Name': null, 'Description': null};
     }
 
     final double totalColumnWidth = _calculateTotalWidth(headerMap);
 
-    // Get available width from layout builder
     return LayoutBuilder(
         builder: (context, constraints) {
           final double availableWidth = constraints.maxWidth;
           final double requestedMinWidth = widget.minWidth ?? 0;
 
-          // Use the larger of total column width, available width, or requested min width
           final double tableWidth = math.max(
               totalColumnWidth,
               math.max(availableWidth, requestedMinWidth)
           );
 
+          // For card layout, don't show traditional table headers
+          if (_currentTableType == FlexibleDataTableType.card) {
+            return Container(
+              decoration: _getContainerDecoration(isDarkMode),
+              child: _buildTableBody(headerMap, tableWidth),
+            );
+          }
+
           return Container(
-            decoration: BoxDecoration(
-              border: Border.all(color: _border),
-              borderRadius: BorderRadius.circular(4),
-              color: isDarkMode ? Colors.grey[900] : Colors.white,
-            ),
+            decoration: _getContainerDecoration(isDarkMode),
             child: Column(
               children: [
-                // Headers are always shown
+                // Headers
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   controller: _headerScrollController,
@@ -559,10 +783,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                       columnWidths: _buildColumnWidths(headerMap),
                       children: [
                         TableRow(
-                          decoration: BoxDecoration(
-                            color: widget.headerColor,
-                            borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
-                          ),
+                          decoration: _getHeaderDecoration(),
                           children: _buildHeaderCells(headerMap).map((cell) =>
                               SizedBox(height: widget.headerHeight, child: cell)
                           ).toList(),
@@ -581,8 +802,135 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     );
   }
 
+  BoxDecoration _getContainerDecoration(bool isDarkMode) {
+    switch (_currentTableType) {
+      case FlexibleDataTableType.standard:
+      // Standard type - no borders, clean look
+        return BoxDecoration(
+          borderRadius: BorderRadius.circular(4),
+          color: isDarkMode ? Colors.grey[900] : Colors.white,
+        );
+      case FlexibleDataTableType.bordered:
+        return BoxDecoration(
+          border: Border.all(color: _border, width: 1),
+          borderRadius: BorderRadius.circular(4),
+          color: isDarkMode ? Colors.grey[900] : Colors.white,
+        );
+      case FlexibleDataTableType.modern:
+      // Modern: Premium look with gradients, shadows, and rounded corners
+        return BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              isDarkMode ? Colors.grey[850]! : Colors.white,
+              isDarkMode ? Colors.grey[900]! : Colors.grey.shade50,
+            ],
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDarkMode ? 0.3 : 0.1),
+              blurRadius: 20,
+              offset: const Offset(0, 8),
+              spreadRadius: 2,
+            ),
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDarkMode ? 0.1 : 0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+          border: Border.all(
+            color: isDarkMode ? Colors.white.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.05),
+            width: 1,
+          ),
+        );
+      case FlexibleDataTableType.minimal:
+      // Minimal: Ultra-clean with transparent background
+        return BoxDecoration(
+          color: Colors.transparent,
+        );
+      case FlexibleDataTableType.striped:
+        return BoxDecoration(
+          border: Border.all(color: _border.withValues(alpha: 0.5)),
+          borderRadius: BorderRadius.circular(4),
+          color: isDarkMode ? Colors.grey[900] : Colors.white,
+        );
+      case FlexibleDataTableType.compact:
+        return BoxDecoration(
+          border: Border.all(color: _border.withValues(alpha: 0.3)),
+          borderRadius: BorderRadius.circular(2),
+          color: isDarkMode ? Colors.grey[900] : Colors.white,
+        );
+      case FlexibleDataTableType.card:
+        return BoxDecoration(
+          color: isDarkMode ? Colors.grey[900] : Colors.white,
+        );
+      default:
+        return BoxDecoration(
+          borderRadius: BorderRadius.circular(4),
+          color: isDarkMode ? Colors.grey[900] : Colors.white,
+        );
+    }
+  }
 
-  TableRow _buildTableRow(T item, Map<String, dynamic> headerMap) {
+  BoxDecoration _getHeaderDecoration() {
+    switch (_currentTableType) {
+      case FlexibleDataTableType.standard:
+        return BoxDecoration(
+          color: widget.headerColor,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
+        );
+      case FlexibleDataTableType.modern:
+      // Modern: Premium header with gradient and shadow
+        return BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              widget.primaryColor.withValues(alpha: 0.9),
+              widget.primaryColor.withValues(alpha: 0.7),
+            ],
+          ),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+          boxShadow: [
+            BoxShadow(
+              color: widget.primaryColor.withValues(alpha: 0.3),
+              blurRadius: 8,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        );
+      case FlexibleDataTableType.minimal:
+      // Minimal: No background, just transparent
+        return BoxDecoration(
+          color: Colors.transparent,
+        );
+      case FlexibleDataTableType.striped:
+        return BoxDecoration(
+          color: widget.headerColor,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
+        );
+      case FlexibleDataTableType.compact:
+        return BoxDecoration(
+          color: widget.headerColor,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(2)),
+        );
+      case FlexibleDataTableType.bordered:
+        return BoxDecoration(
+          color: widget.headerColor,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
+        );
+      default:
+        return BoxDecoration(
+          color: widget.headerColor,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
+        );
+    }
+  }
+
+  TableRow _buildTableRow(T item, Map<String, dynamic> headerMap, int index) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     final cells = <Widget>[];
 
@@ -604,15 +952,15 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       cells.add(
         Container(
           constraints: BoxConstraints(
-            minHeight: widget.rowHeight,
+            minHeight: _getRowHeight(),
           ),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: _getCellPadding(),
           child: widget.cellBuilders?.containsKey(key) ?? false
               ? widget.cellBuilders![key]!(value, item)
               : Text(
             value?.toString() ?? '',
             style: GoogleFonts.poppins(
-              fontSize: 13,
+              fontSize: _currentTableType == FlexibleDataTableType.compact ? 12 : 13,
               color: _rowText,
             ),
           ),
@@ -623,24 +971,56 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     cells.add(
       Container(
         constraints: BoxConstraints(
-          minHeight: widget.rowHeight,
+          minHeight: _getRowHeight(),
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: _getCellPadding(),
         child: widget.actionBuilder(item),
       ),
     );
 
     return TableRow(
       decoration: BoxDecoration(
-        color: isDarkMode ? Colors.grey[850] : Colors.white,
-        border: Border(
-          bottom: BorderSide(
-            color: _border,
-          ),
-        ),
+        color: _getRowColor(index, isDarkMode),
+        border: _getRowBorder(),
       ),
       children: cells,
     );
+  }
+
+  Border? _getRowBorder() {
+    switch (_currentTableType) {
+      case FlexibleDataTableType.standard:
+      case FlexibleDataTableType.card:
+        return null; // No borders for these types
+      case FlexibleDataTableType.minimal:
+      // Minimal: Only subtle bottom lines
+        return Border(
+          bottom: BorderSide(
+            color: _border.withValues(alpha: 0.1),
+            width: 1,
+          ),
+        );
+      case FlexibleDataTableType.modern:
+      // Modern: Very subtle borders with glow effect
+        return Border(
+          bottom: BorderSide(
+            color: widget.primaryColor.withValues(alpha: 0.1),
+            width: 2,
+          ),
+        );
+      case FlexibleDataTableType.striped:
+      case FlexibleDataTableType.compact:
+        return Border(
+          bottom: BorderSide(
+            color: _border.withValues(alpha: 0.3),
+            width: 0.5,
+          ),
+        );
+      case FlexibleDataTableType.bordered:
+        return null; // Handled by table border
+      default:
+        return null;
+    }
   }
 
   List<Widget> _buildHeaderCells(Map<String, dynamic> headerMap) {
@@ -675,24 +1055,37 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     }
 
     for (final key in headerMap.keys) {
-      // Use custom header builder if provided
       if (widget.customHeaderBuilders?.containsKey(key) ?? false) {
         cells.add(Container(
           height: widget.headerHeight,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          padding: EdgeInsets.symmetric(horizontal: _currentTableType == FlexibleDataTableType.compact ? 8 : 16),
           child: widget.customHeaderBuilders![key]!(key),
         ));
       } else {
+        // Determine header text color based on table type
+        Color headerTextColor = _currentTableType == FlexibleDataTableType.modern
+            ? Colors.white  // White text for modern gradient header
+            : (_currentTableType == FlexibleDataTableType.minimal
+            ? _headerText.withValues(alpha: 0.8)  // Subtle text for minimal
+            : _headerText);
+
         cells.add(Container(
           height: widget.headerHeight,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          padding: EdgeInsets.symmetric(horizontal: _currentTableType == FlexibleDataTableType.compact ? 8 : 16),
           child: Row(
             children: [
               Text(
                 key,
                 style: GoogleFonts.poppins(
-                  color: _headerText,
-                  fontWeight: FontWeight.w500,
+                    color: headerTextColor,
+                    fontWeight: _currentTableType == FlexibleDataTableType.modern
+                        ? FontWeight.w600
+                        : (_currentTableType == FlexibleDataTableType.minimal
+                        ? FontWeight.w400
+                        : FontWeight.w500),
+                    fontSize: _currentTableType == FlexibleDataTableType.compact
+                        ? widget.headerFontSize - 1
+                        : widget.headerFontSize
                 ),
               ),
               if (widget.isSort && widget.data.isNotEmpty)
@@ -704,8 +1097,10 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                         ? Icons.arrow_upward
                         : Icons.arrow_downward
                         : Icons.sort,
-                    color: _headerText,
-                    size: 16,
+                    color: headerTextColor,
+                    size: _currentTableType == FlexibleDataTableType.compact
+                        ? widget.headerFontSize - 1
+                        : widget.headerFontSize,
                   ),
                 ),
             ],
@@ -714,15 +1109,29 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       }
     }
 
+    // Action column header
+    Color actionHeaderTextColor = _currentTableType == FlexibleDataTableType.modern
+        ? Colors.white
+        : (_currentTableType == FlexibleDataTableType.minimal
+        ? _headerText.withValues(alpha: 0.8)
+        : _headerText);
+
     cells.add(Container(
       height: widget.headerHeight,
-      padding: const EdgeInsets.symmetric(horizontal: 14),
+      padding: EdgeInsets.symmetric(horizontal: _currentTableType == FlexibleDataTableType.compact ? 8 : 14),
       child: Center(
         child: Text(
           widget.actionColumnName ?? 'Actions',
           style: GoogleFonts.poppins(
-            color: _headerText,
-            fontWeight: FontWeight.w500,
+              color: actionHeaderTextColor,
+              fontWeight: _currentTableType == FlexibleDataTableType.modern
+                  ? FontWeight.w600
+                  : (_currentTableType == FlexibleDataTableType.minimal
+                  ? FontWeight.w400
+                  : FontWeight.w500),
+              fontSize: _currentTableType == FlexibleDataTableType.compact
+                  ? widget.headerFontSize - 1
+                  : widget.headerFontSize
           ),
         ),
       ),
@@ -731,7 +1140,6 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     return cells;
   }
 
-// Update _buildColumnWidths method
   Map<int, TableColumnWidth> _buildColumnWidths(Map<String, dynamic> headerMap) {
     final widths = <int, TableColumnWidth>{};
     var index = 0;
@@ -751,7 +1159,6 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       index++;
     }
 
-    // Add action column width
     if (widget.actionColumnFlex != null) {
       widths[index] = FlexColumnWidth(widget.actionColumnFlex!.toDouble());
     } else {
@@ -772,14 +1179,12 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       if (widget.columnSizes?.containsKey(key) ?? false) {
         totalWidth += widget.columnSizes![key]!;
       } else if (widget.columnFlex?.containsKey(key) ?? false) {
-        // For flex columns, provide a minimum width
         totalWidth += 100;
       } else {
         totalWidth += 150;
       }
     }
 
-    // Add action column width
     totalWidth += (widget.actionColumnWidth ?? 100);
 
     return totalWidth;
@@ -791,13 +1196,95 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
         _buildPageSizeDropdown(),
         const SizedBox(width: 16),
         _buildExportButton(),
+        if (widget.showTableTypeSelector) ...[
+          const SizedBox(width: 16),
+          _buildTableTypeSelector(),
+        ],
         const Spacer(),
         _buildSearchField(),
       ],
     );
   }
 
-  // Continuing from where we left off
+  Widget _buildTableTypeSelector() {
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    final backgroundColor = isDarkMode ? Colors.grey.shade900 : Colors.white;
+    final borderColor = isDarkMode ? Colors.grey.shade700 : Colors.grey.shade300;
+
+    return Container(
+      height: 40,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        color: backgroundColor,
+        border: Border.all(color: borderColor),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(7),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 4,
+              height: 40,
+              color: widget.primaryColor,
+            ),
+            Padding(
+              padding: const EdgeInsets.only(left: 8, right: 2),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<FlexibleDataTableType>(
+                  value: _currentTableType,
+                  isDense: true,
+                  icon: Icon(
+                    Icons.table_chart,
+                    color: widget.primaryColor,
+                    size: 16,
+                  ),
+                  items: FlexibleDataTableType.values.map((type) {
+                    return DropdownMenuItem(
+                      value: type,
+                      child: Text(
+                        _getTableTypeDisplayName(type),
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                  onChanged: (FlexibleDataTableType? value) {
+                    if (value != null) {
+                      setState(() {
+                        _currentTableType = value;
+                      });
+                    }
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _getTableTypeDisplayName(FlexibleDataTableType type) {
+    switch (type) {
+      case FlexibleDataTableType.standard:
+        return 'Standard';
+      case FlexibleDataTableType.bordered:
+        return 'Bordered';
+      case FlexibleDataTableType.striped:
+        return 'Striped';
+      case FlexibleDataTableType.card:
+        return 'Card';
+      case FlexibleDataTableType.compact:
+        return 'Compact';
+      case FlexibleDataTableType.modern:
+        return 'Modern';
+      case FlexibleDataTableType.minimal:
+        return 'Minimal';
+    }
+  }
 
   Widget _buildExportButton() {
     return Theme(
@@ -821,8 +1308,8 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
           decoration: BoxDecoration(
             gradient: LinearGradient(
               colors: [
-                widget.headerColor.withValues(alpha: 0.9),
-                widget.headerColor,
+                widget.primaryColor.withValues(alpha: 0.9),
+                widget.primaryColor,
               ],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
@@ -830,7 +1317,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
             borderRadius: BorderRadius.circular(6),
             boxShadow: [
               BoxShadow(
-                color: widget.headerColor.withValues(alpha: 0.3),
+                color: widget.primaryColor.withValues(alpha: 0.3),
                 spreadRadius: 1,
                 blurRadius: 3,
                 offset: const Offset(0, 1),
@@ -953,25 +1440,20 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
   }
 
   Widget _buildPageSizeDropdown() {
-    // Define a special value for "All" (using -1 as a marker)
     const int allItemsValue = -1;
-
-    // Create a list of possible values including the "All" option
     final List<dynamic> pageSizes = [5, 10, 25, 50, 100, allItemsValue];
 
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
-    // Make sure the dropdown color matches the container background exactly
     final backgroundColor = isDarkMode ? Colors.grey.shade900 : Colors.white;
     final borderColor = isDarkMode ? Colors.grey.shade700 : Colors.grey.shade300;
     final textColor = isDarkMode ? Colors.white : Colors.grey.shade800;
     final labelColor = isDarkMode ? Colors.grey.shade400 : Colors.grey.shade600;
 
-    // Fixed width for both the dropdown and its menu items
     const double dropdownWidth = 80;
 
     return Container(
       height: 40,
-      width: dropdownWidth, // Fixed width for the dropdown
+      width: dropdownWidth,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(8),
         color: backgroundColor,
@@ -994,25 +1476,22 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Left accent bar
               Container(
                 width: 4,
                 height: 40,
-                color: widget.headerColor,
+                color: widget.primaryColor,
               ),
-
-              // Dropdown content
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.only(left: 8, right: 2),
                   child: DropdownButtonHideUnderline(
                     child: DropdownButton<dynamic>(
-                      isExpanded: true, // Make dropdown use all available space
+                      isExpanded: true,
                       value: _pageSize == widget.totalItems ? allItemsValue : _pageSize,
                       isDense: true,
                       icon: Icon(
                         Icons.arrow_drop_down,
-                        color: widget.headerColor,
+                        color: widget.primaryColor,
                         size: 20,
                       ),
                       iconSize: 20,
@@ -1026,7 +1505,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                               style: GoogleFonts.poppins(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w500,
-                                color: widget.headerColor,
+                                color: widget.primaryColor,
                               ),
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -1034,7 +1513,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                         }).toList();
                       },
                       elevation: 4,
-                      dropdownColor: backgroundColor, // Ensure dropdown matches background
+                      dropdownColor: backgroundColor,
                       borderRadius: BorderRadius.circular(8),
                       style: GoogleFonts.poppins(
                         color: textColor,
@@ -1042,7 +1521,6 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                       ),
                       alignment: AlignmentDirectional.centerStart,
                       menuMaxHeight: 305,
-                      // Using customized dropdown items to create compact layout
                       items: pageSizes.map((dynamic value) {
                         bool isSelected = _pageSize == value;
                         return DropdownMenuItem<dynamic>(
@@ -1051,36 +1529,33 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                             child: Container(
                               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
                               constraints: const BoxConstraints(
-                                minHeight: 30, // This will make the item height more compact
-                                maxHeight: 30, // Ensure consistent height
+                                minHeight: 30,
+                                maxHeight: 30,
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 mainAxisAlignment: MainAxisAlignment.start,
                                 crossAxisAlignment: CrossAxisAlignment.center,
                                 children: [
-                                  // Selection indicator dot
                                   Container(
                                     width: 6,
                                     height: 6,
                                     margin: const EdgeInsets.only(right: 6),
                                     decoration: BoxDecoration(
                                       shape: BoxShape.circle,
-                                      color: isSelected ? widget.headerColor : Colors.transparent,
+                                      color: isSelected ? widget.primaryColor : Colors.transparent,
                                       border: isSelected
                                           ? null
                                           : Border.all(color: labelColor, width: 1),
                                     ),
                                   ),
-
-                                  // Item text
                                   Expanded(
                                     child: Text(
                                       value == allItemsValue ? "All" : "$value",
                                       style: GoogleFonts.poppins(
                                         fontSize: 13,
                                         fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                                        color: isSelected ? widget.headerColor : textColor,
+                                        color: isSelected ? widget.primaryColor : textColor,
                                       ),
                                       overflow: TextOverflow.ellipsis,
                                     ),
@@ -1094,7 +1569,6 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                       onChanged: (value) {
                         if (value != null) {
                           setState(() {
-                            // If "All" is selected, set _pageSize to the total number of items
                             _pageSize = (value == allItemsValue) ? widget.totalItems : value;
                             _currentPage = 0;
                           });
@@ -1113,22 +1587,18 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
   }
 
   Future<void> _exportToExcel() async {
-    // We'll use _showProgressDialogWithTimeout to ensure the dialog is dismissed
     await _showProgressDialogWithTimeout('Generating Excel file...', () async {
       final workbook = excel.Excel.createExcel();
       final sheet = workbook.sheets[workbook.getDefaultSheet() ?? 'Sheet1'];
       if (sheet == null) throw Exception('Failed to create sheet');
 
-      // Set column widths
       for (var i = 0; i < widget.toTableDataMap(_filteredData.first).length + 1; i++) {
         sheet.setColumnWidth(i, 20.0);
       }
 
-      // Add headers with merged cells for better visibility
       final headerMap = _getHeaderMap();
       var columnIndex = 0;
 
-      // Add S.No header
       sheet.merge(excel.CellIndex.indexByColumnRow(columnIndex: columnIndex, rowIndex: 0),
           excel.CellIndex.indexByColumnRow(columnIndex: columnIndex, rowIndex: 0));
 
@@ -1146,7 +1616,6 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       );
       columnIndex++;
 
-      // Add other headers
       for (final key in headerMap.keys) {
         sheet.merge(excel.CellIndex.indexByColumnRow(columnIndex: columnIndex, rowIndex: 0),
             excel.CellIndex.indexByColumnRow(columnIndex: columnIndex, rowIndex: 0));
@@ -1167,12 +1636,10 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
         columnIndex++;
       }
 
-      // Add data with alternating row colors
       for (var i = 0; i < _filteredData.length; i++) {
         columnIndex = 0;
         final rowColor = i % 2 == 0 ? '#F3F4F6' : '#FFFFFF';
 
-        // Add S.No
         final sNoDataCell = sheet.cell(excel.CellIndex.indexByColumnRow(
           columnIndex: columnIndex,
           rowIndex: i + 1,
@@ -1184,7 +1651,6 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
         );
         columnIndex++;
 
-        // Add row data
         final rowData = widget.toTableDataMap(_filteredData[i]);
         for (final key in headerMap.keys) {
           final value = rowData[key];
@@ -1211,48 +1677,37 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
         }
       }
 
-      // Auto-fit columns
       sheet.setDefaultColumnWidth(15.0);
 
       final excelData = workbook.encode();
       if (excelData == null) throw Exception('Failed to save Excel file');
 
-      // Save the file - no need to dismiss dialog here as _showProgressDialogWithTimeout handles it
       await _saveFile(excelData, '${widget.fileName}.xlsx');
     });
   }
 
-  // Add a helper method to get header map consistently
   Map<String, dynamic> _getHeaderMap() {
-    // First try to use explicitly provided headers
     if (widget.headers != null && widget.headers!.isNotEmpty) {
       return Map<String, dynamic>.from(widget.headers!);
     }
-    // Then try to use the current data
     else if (widget.data.isNotEmpty) {
       return Map<String, dynamic>.from(widget.toTableDataMap(widget.data.first));
     }
-    // Then try to use our cached default header map
     else if (_defaultHeaderMap != null && _defaultHeaderMap!.isNotEmpty) {
       return _defaultHeaderMap!;
     }
-    // Then try to use custom header builders
     else if (widget.customHeaderBuilders != null && widget.customHeaderBuilders!.isNotEmpty) {
       return Map<String, dynamic>.fromIterable(
           widget.customHeaderBuilders!.keys,
           value: (_) => null
       );
     }
-    // As a last resort, provide at least some default headers
     else {
-      // Create basic placeholder headers if we have absolutely nothing else
       return {'ID': null, 'Name': null, 'Description': null};
     }
   }
 
-// Updated _exportToPdf method with robust dialog handling
   Future<void> _exportToPdf() async {
-    // We'll use _showProgressDialogWithTimeout to ensure the dialog is dismissed
     await _showProgressDialogWithTimeout('Generating PDF file...', () async {
       final pdf = pw.Document();
       final headerMap = _getHeaderMap();
@@ -1262,12 +1717,12 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
           pageFormat: PdfPageFormat.a4.landscape,
           build: (context) => [
             pw.TableHelper.fromTextArray(
-              headers: ['S.No', ...headerMap.keys.toList()],
+              headers: ['S.No', ...headerMap.keys],
               data: _filteredData.asMap().entries.map((entry) {
                 final map = widget.toTableDataMap(entry.value);
                 return [
                   (entry.key + 1).toString(),
-                  ...headerMap.keys.map((key) => map[key]?.toString() ?? '').toList()
+                  ...headerMap.keys.map((key) => map[key]?.toString() ?? '')
                 ];
               }).toList(),
               headerStyle: pw.TextStyle(
@@ -1289,22 +1744,18 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
 
       final bytes = await pdf.save();
 
-      // Save the file - no need to dismiss dialog here as _showProgressDialogWithTimeout handles it
       await _saveFile(bytes, '${widget.fileName}.pdf');
     });
   }
 
   Future<void> _showProgressDialogWithTimeout(String message, Future<void> Function() operation) async {
-    // Keep track of whether we need to dismiss the dialog
     bool needToDismiss = true;
     bool operationComplete = false;
 
-    // Show the dialog
     if (mounted) {
       _showProgressDialog(message);
     }
 
-    // Setup a timeout to ensure the dialog is dismissed
     Timer? timeoutTimer;
     timeoutTimer = Timer(const Duration(seconds: 15), () {
       if (needToDismiss && mounted && !operationComplete) {
@@ -1312,12 +1763,11 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
         _dismissDialog();
         needToDismiss = false;
 
-        // Show a message that the operation continues in background
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Export operation continues in the background...'),
-              backgroundColor: widget.headerColor,
+              backgroundColor: widget.primaryColor,
               duration: const Duration(seconds: 5),
             ),
           );
@@ -1326,22 +1776,17 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     });
 
     try {
-      // Run the operation
       await operation();
       operationComplete = true;
 
-      // Cancel the timeout timer
       timeoutTimer.cancel();
 
-      // Dismiss the dialog if needed
       if (needToDismiss && mounted) {
-        // Add a small delay to ensure UI updates properly
         await Future.delayed(const Duration(milliseconds: 500));
         _dismissDialog();
         needToDismiss = false;
       }
 
-      // Show success message
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1354,27 +1799,21 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     } catch (e) {
       operationComplete = true;
 
-      // Cancel the timeout timer
       timeoutTimer.cancel();
 
-      // Dismiss the dialog if needed
       if (needToDismiss && mounted) {
         _dismissDialog();
         needToDismiss = false;
       }
 
-      // Show error dialog
       _showErrorDialog('Export Error', e.toString());
     }
   }
 
-// 4. Improved dialog dismissal method with multiple fallbacks
   void _dismissDialog() {
     if (!mounted) return;
 
-    // Try multiple approaches to ensure the dialog is dismissed
     try {
-      // Approach 1: Standard Navigator
       if (Navigator.of(context, rootNavigator: true).canPop()) {
         print("Dismissing dialog with rootNavigator");
         Navigator.of(context, rootNavigator: true).pop();
@@ -1385,7 +1824,6 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     }
 
     try {
-      // Approach 2: Basic Navigator
       if (Navigator.of(context).canPop()) {
         print("Dismissing dialog with basic Navigator");
         Navigator.of(context).pop();
@@ -1396,7 +1834,6 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     }
 
     try {
-      // Approach 3: Direct pop
       if (Navigator.canPop(context)) {
         print("Dismissing dialog with direct pop");
         Navigator.pop(context);
@@ -1406,20 +1843,15 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       print("Direct pop dismissal failed: $e");
     }
 
-    // If we get here, all approaches failed
     print("Warning: Could not dismiss dialog through normal means");
   }
 
-// Keep track of whether a dialog is showing to prevent multiple dialogs
   bool _isDialogShowing = false;
 
-// Modified progress dialog with better state tracking
   void _showProgressDialog(String message) {
-    // Prevent multiple dialogs
     if (_isDialogShowing) return;
     _isDialogShowing = true;
 
-    // Use a GlobalKey to get access to the dialog's context more reliably
     final GlobalKey<State> dialogKey = GlobalKey<State>();
 
     showDialog(
@@ -1427,7 +1859,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       barrierDismissible: false,
       builder: (BuildContext dialogContext) {
         return PopScope(
-          canPop: false, // Prevent back button dismissal
+          canPop: false,
           child: Dialog(
             key: dialogKey,
             shape: RoundedRectangleBorder(
@@ -1456,11 +1888,11 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                     height: 72,
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: widget.headerColor.withValues(alpha: 0.1),
+                      color: widget.primaryColor.withValues(alpha: 0.1),
                       shape: BoxShape.circle,
                     ),
                     child: CircularProgressIndicator(
-                      valueColor: AlwaysStoppedAnimation<Color>(widget.headerColor),
+                      valueColor: AlwaysStoppedAnimation<Color>(widget.primaryColor),
                       strokeWidth: 3,
                     ),
                   ),
@@ -1495,12 +1927,10 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
         );
       },
     ).then((_) {
-      // Reset dialog state when closed
       _isDialogShowing = false;
     });
   }
 
-// Enhanced success dialog with premium UI
   void _showSuccessDialog(String title, Map<String, String> details) {
     showDialog(
       context: context,
@@ -1601,7 +2031,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
               ElevatedButton(
                 onPressed: () => Navigator.of(context).pop(),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: widget.headerColor,
+                  backgroundColor: widget.primaryColor,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                   shape: RoundedRectangleBorder(
@@ -1624,8 +2054,6 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     );
   }
 
-// Enhanced error dialog with premium UI
-  // Continuing the _showErrorDialog method
   void _showErrorDialog(String title, String message) {
     showDialog(
       context: context,
@@ -1708,7 +2136,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
               ElevatedButton(
                 onPressed: () => Navigator.of(context).pop(),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: widget.headerColor,
+                  backgroundColor: widget.primaryColor,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                   shape: RoundedRectangleBorder(
@@ -1734,7 +2162,6 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
   Future<void> _saveFile(List<int> bytes, String fileName) async {
     try {
       if (kIsWeb) {
-        // Web platform implementation
         final blob = html.Blob([bytes]);
         final url = html.Url.createObjectUrlFromBlob(blob);
         final anchor = html.AnchorElement(href: url)
@@ -1755,26 +2182,20 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
           );
         }
       } else {
-        // Mobile platform - use share functionality
         try {
-          // For Android/iOS, we'll save to a temporary directory first
           final tempDir = await getTemporaryDirectory();
           final filePath = '${tempDir.path}/$fileName';
           final file = File(filePath);
 
-          // Write the bytes to the file
           await file.writeAsBytes(bytes);
 
-          // Show the share dialog
           if (mounted) {
-            // Try with share_plus
             await Share.shareXFiles(
               [XFile(filePath)],
               subject: 'Exported ${fileName.split('.').last} file',
               text: 'Here is your exported data',
             );
 
-            // Show success message
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
@@ -1785,7 +2206,6 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
             }
           }
         } catch (e) {
-          // If share fails, try saving to downloads directory
           await _saveToDownloads(bytes, fileName);
         }
       }
@@ -1801,7 +2221,6 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       Directory? directory;
 
       if (Platform.isAndroid) {
-        // Check for storage permission
         var status = await Permission.storage.status;
         if (!status.isGranted) {
           status = await Permission.storage.request();
@@ -1810,14 +2229,11 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
           }
         }
 
-        // Try to access downloads directory on Android
         directory = Directory('/storage/emulated/0/Download');
         if (!await directory.exists()) {
-          // Fallback to documents directory
           directory = await getApplicationDocumentsDirectory();
         }
       } else {
-        // On iOS, use documents directory
         directory = await getApplicationDocumentsDirectory();
       }
 
@@ -1867,7 +2283,6 @@ class AppStackLoader extends StatelessWidget {
     );
   }
 
-  /// set parent widget in center
   Widget center({double? heightFactor, double? widthFactor}) {
     return Center(
       heightFactor: heightFactor,
@@ -1876,7 +2291,6 @@ class AppStackLoader extends StatelessWidget {
     );
   }
 
-  /// Circular Progressbar
   Widget hProgress({
     Color color = Colors.blue,
   }) {
@@ -1906,19 +2320,15 @@ class AppStackLoader extends StatelessWidget {
   }
 }
 
-/// returns Radius
 BorderRadius radius([double? radius]) {
   return BorderRadius.all(radiusCircular(radius ?? 8));
 }
 
-/// returns Radius
 Radius radiusCircular([double? radius]) {
   return Radius.circular(radius ?? 8);
 }
 
 extension WidgetExtension on Widget? {
-
-  /// set parent widget in center
   Widget center({double? heightFactor, double? widthFactor}) {
     return Center(
       heightFactor: heightFactor,
@@ -1927,13 +2337,11 @@ extension WidgetExtension on Widget? {
     );
   }
 
-  /// set visibility
   Widget visible(bool visible, {Widget? defaultWidget}) {
     return visible ? this! : (defaultWidget ?? SizedBox());
   }
 }
 
 extension BooleanExtensions on bool? {
-  /// Validate given bool is not null and returns given value if null.
   bool validate({bool value = false}) => this ?? value;
 }

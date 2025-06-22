@@ -52,6 +52,8 @@ class UserTableExample extends StatelessWidget {
     // Add more users here
   ];
 
+  UserTableExample({super.key});
+
   void onEdit(UserModel user) {
     print('Edit user: ${user.name}');
   }

@@ -1,6 +1,6 @@
 name: flexible_data_table
 description: "This package supports server-side datatables, which can significantly enhance performance when dealing with large datasets by offloading data processing to the server. #Datatabel #ServerSideDatatable"
-version: 1.0.6
+version: 1.0.7
 
 #homepage: https://iTechQua.github.io
 repository: https://github.com/iTechQua/flexible_data_table
@@ -16,13 +16,13 @@ dependencies:
   flutter:
     sdk: flutter
 
-  google_fonts: ^6.2.1
-  path_provider: ^2.1.5
-  pdf: ^3.11.3
-  universal_html: ^2.2.4
-  excel: ^4.0.6
-  permission_handler: ^11.4.0
-  share_plus: ^10.1.4
+  google_fonts: '>=4.0.0 <7.1.0'
+  path_provider: '>=1.0.0 <7.1.0'
+  pdf: '>=1.0.0 <7.1.0'
+  universal_html: '>=1.0.0 <7.1.0'
+  excel: '>=3.0.0 <7.1.0'
+  permission_handler: '>=8.0.0 <13.1.0'
+  share_plus: '>=6.0.0 <12.1.0'
 
 dev_dependencies:
   flutter_test:

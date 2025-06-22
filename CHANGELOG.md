@@ -1,3 +1,8 @@
+## [1.0.7] - 2025-06-22
+
+### Updated
+- This version added new parameter table styles
+
 ## [1.0.6] - 2025-05-1
 
 ### Updated
