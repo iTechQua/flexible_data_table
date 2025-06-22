@@ -1,3 +1,8 @@
+## [1.0.8] - 2025-06-22
+
+### Updated
+- This version fix version issue
+
 ## [1.0.7] - 2025-06-22
 
 ### Updated
