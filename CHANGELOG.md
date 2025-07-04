@@ -1,3 +1,8 @@
+## [1.0.9] - 2025-07-05
+
+### Updated
+- This version fix dark mode issue
+
 ## [1.0.8] - 2025-06-22
 
 ### Updated

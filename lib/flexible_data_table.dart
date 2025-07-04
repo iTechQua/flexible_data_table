@@ -41,7 +41,7 @@ class FlexibleDataTable<T> extends StatefulWidget {
   final Map<String, Widget Function(String columnName)>? customHeaderBuilders;
   final double? minWidth;
   final Color primaryColor;
-  final Color headerColor;
+  final Color? headerColor;
   final Color? cardColor;
   final double rowHeight;
   final double headerHeight;
@@ -89,7 +89,7 @@ class FlexibleDataTable<T> extends StatefulWidget {
     this.heading,
     this.loader,
     this.primaryColor = const Color(0xFF6D28D9),
-    this.headerColor = const Color(0xFFF6F8FF),
+    this.headerColor,
     this.cardColor,
     this.rowHeight = 50,
     this.headerHeight = 50,
@@ -136,20 +136,34 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
 
   Map<String, dynamic>? _defaultHeaderMap;
 
+  // Enhanced theme-aware color getters
+  bool get _isDarkMode => Theme.of(context).brightness == Brightness.dark;
+
+  Color get _surfaceColor => _isDarkMode ? Colors.grey[900]! : Colors.white;
+  Color get _cardBackgroundColor => widget.cardColor ?? (_isDarkMode ? Colors.grey[850]! : Colors.white);
+  Color get _dialogBackgroundColor => _isDarkMode ? Colors.grey[900]! : Colors.white;
+  Color get _dialogBorderColor => _isDarkMode ? Colors.grey[700]! : Colors.grey.shade300;
+
+  Color get _defaultHeaderColor => _isDarkMode ? Colors.grey[800]! : const Color(0xFFF6F8FF);
+  Color get _headerColorFinal => widget.headerColor ?? _defaultHeaderColor;
+
   Color get _headerText => widget.headerTextColor ??
-      (Theme.of(context).brightness == Brightness.dark ? Colors.white : Colors.black87);
+      (_isDarkMode ? Colors.grey[100]! : Colors.grey[800]!);
 
   Color get _rowText => widget.rowTextColor ??
-      (Theme.of(context).brightness == Brightness.dark ? Colors.white : Colors.black87);
+      (_isDarkMode ? Colors.grey[100]! : Colors.grey[800]!);
 
   Color get _border => widget.borderColor ??
-      (Theme.of(context).brightness == Brightness.dark ? Colors.white24 : Colors.grey.shade200);
+      (_isDarkMode ? Colors.grey[700]! : Colors.grey.shade300);
 
   Color get _checkboxColor => widget.checkboxColor ??
-      (Theme.of(context).brightness == Brightness.dark ? Colors.white70 : Colors.white);
+      (_isDarkMode ? widget.primaryColor : widget.primaryColor);
 
   Color get _stripedColor => widget.stripedRowColor ??
-      (Theme.of(context).brightness == Brightness.dark ? Colors.grey.shade800 : Colors.grey.shade50);
+      (_isDarkMode ? Colors.grey[500]! : Colors.grey.shade50);
+
+  Color get _subtleTextColor => _isDarkMode ? Colors.grey[400]! : Colors.grey[600]!;
+  Color get _disabledColor => _isDarkMode ? Colors.grey[600]! : Colors.grey[400]!;
 
   Future<bool> checkPermissions() async {
     final Map<Permission, PermissionStatus> statuses = await [
@@ -250,7 +264,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       case FlexibleDataTableType.striped:
       case FlexibleDataTableType.compact:
         return TableBorder(
-          horizontalInside: BorderSide(color: _border.withValues(alpha: 0.5)),
+          horizontalInside: BorderSide(color: _border.withValues(alpha: _isDarkMode ? 0.2 : 0.5)),
         );
       default:
         return null;
@@ -279,29 +293,35 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     }
   }
 
-  Color? _getRowColor(int index, bool isDarkMode) {
+  Color? _getRowColor(int index) {
     switch (_currentTableType) {
       case FlexibleDataTableType.striped:
-        return index % 2 == 0
-            ? (isDarkMode ? Colors.grey[850] : Colors.white)
-            : _stripedColor;
+        if (_isDarkMode) {
+          return index % 2 == 0
+              ? Colors.black
+              : Colors.grey[900]!;
+        } else {
+          return index % 2 == 0
+              ? Colors.white
+              : _stripedColor;
+        }
       case FlexibleDataTableType.card:
         return null; // Cards handle their own color
       case FlexibleDataTableType.minimal:
         return Colors.transparent; // Minimal uses transparent rows
       case FlexibleDataTableType.standard:
-        return isDarkMode ? Colors.grey[900] : Colors.white;
+        return _surfaceColor;
       case FlexibleDataTableType.modern:
       // Modern: Subtle gradient-like alternating colors
         return index % 2 == 0
-            ? (isDarkMode ? Colors.grey[850]!.withValues(alpha: 0.7) : Colors.white.withValues(alpha: 0.9))
-            : (isDarkMode ? Colors.grey[800]!.withValues(alpha: 0.5) : Colors.grey.shade50.withValues(alpha: 0.8));
+            ? _surfaceColor.withValues(alpha: 0.9)
+            : (_isDarkMode ? Colors.grey[800]!.withValues(alpha: 0.5) : Colors.grey.shade50.withValues(alpha: 0.8));
       case FlexibleDataTableType.compact:
-        return isDarkMode ? Colors.grey[850] : Colors.white;
+        return _surfaceColor;
       case FlexibleDataTableType.bordered:
-        return isDarkMode ? Colors.grey[850] : Colors.white;
+        return _surfaceColor;
       default:
-        return isDarkMode ? Colors.grey[850] : Colors.white;
+        return _surfaceColor;
     }
   }
 
@@ -377,7 +397,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
             _searchQuery.isEmpty ? 'No data available' : 'No matching records found',
             style: GoogleFonts.poppins(
               fontSize: 14,
-              color: _rowText,
+              color: _subtleTextColor,
             ),
           ),
         ),
@@ -396,18 +416,21 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
   }
 
   Widget _buildCardRow(T item, Map<String, dynamic> headerMap, int index) {
-    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     final map = widget.toTableDataMap(item);
 
     return Container(
       margin: EdgeInsets.all(widget.cardMargin ?? 8),
       child: Card(
-        elevation: widget.cardElevation ?? 3,
-        shadowColor: widget.cardShadowColor ?? Colors.grey.shade300,
+        elevation: widget.cardElevation ?? (_isDarkMode ? 2 : 3),
+        shadowColor: widget.cardShadowColor ?? (_isDarkMode ? Colors.black38 : Colors.grey.shade300),
         shape: RoundedRectangleBorder(
           borderRadius: widget.cardBorderRadius ?? BorderRadius.circular(12),
+          side: BorderSide(
+            color: _border.withValues(alpha: 0.3),
+            width: 0.5,
+          ),
         ),
-        color: widget.cardColor ?? (isDarkMode ? Colors.grey[850] : Colors.white),
+        color: _cardBackgroundColor,
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -435,15 +458,27 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
               if (widget.showCheckboxColumn) ...[
                 Row(
                   children: [
-                    Checkbox(
-                      value: widget.selectedItems?.contains(item) ?? false,
-                      onChanged: (value) => widget.onSelectItem?.call(value, item),
+                    Theme(
+                      data: Theme.of(context).copyWith(
+                        checkboxTheme: CheckboxThemeData(
+                          fillColor: WidgetStateProperty.resolveWith((states) {
+                            if (states.contains(WidgetState.selected)) {
+                              return widget.primaryColor;
+                            }
+                            return _isDarkMode ? Colors.grey[700] : Colors.grey[300];
+                          }),
+                        ),
+                      ),
+                      child: Checkbox(
+                        value: widget.selectedItems?.contains(item) ?? false,
+                        onChanged: (value) => widget.onSelectItem?.call(value, item),
+                      ),
                     ),
                     Text(
                       'Select Item',
                       style: GoogleFonts.poppins(
                         fontSize: 12,
-                        color: _rowText.withValues(alpha: 0.7),
+                        color: _subtleTextColor,
                       ),
                     ),
                   ],
@@ -466,7 +501,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                           style: GoogleFonts.poppins(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
-                            color: _rowText.withValues(alpha: 0.8),
+                            color: _subtleTextColor,
                           ),
                         ),
                       ),
@@ -488,20 +523,20 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
 
               // Actions row
               ...[
-              const SizedBox(height: 12),
-              Container(
-                width: double.infinity,
-                height: 1,
-                color: _border.withValues(alpha: 0.3),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  widget.actionBuilder(item),
-                ],
-              ),
-            ],
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  height: 1,
+                  color: _border.withValues(alpha: 0.3),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    widget.actionBuilder(item),
+                  ],
+                ),
+              ],
             ],
           ),
         ),
@@ -521,37 +556,69 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
         children: [
           Text(
             'Showing $startEntry to $endEntry of $_effectiveTotalItems entries',
-            style: GoogleFonts.poppins(fontSize: 14),
+            style: GoogleFonts.poppins(
+              fontSize: 14,
+              color: _subtleTextColor,
+            ),
           ),
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              IconButton(
-                icon: const Icon(Icons.first_page),
+              _buildPaginationButton(
+                icon: Icons.first_page,
                 onPressed: _currentPage > 0 ? () => _changePage(0) : null,
               ),
-              IconButton(
-                icon: const Icon(Icons.chevron_left),
+              _buildPaginationButton(
+                icon: Icons.chevron_left,
                 onPressed: _currentPage > 0 ? () => _changePage(_currentPage - 1) : null,
               ),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 child: Text(
                   'Page ${_currentPage + 1} of $totalPages',
-                  style: GoogleFonts.poppins(fontSize: 14),
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    color: _rowText,
+                  ),
                 ),
               ),
-              IconButton(
-                icon: const Icon(Icons.chevron_right),
+              _buildPaginationButton(
+                icon: Icons.chevron_right,
                 onPressed: _currentPage < totalPages - 1 ? () => _changePage(_currentPage + 1) : null,
               ),
-              IconButton(
-                icon: const Icon(Icons.last_page),
+              _buildPaginationButton(
+                icon: Icons.last_page,
                 onPressed: _currentPage < totalPages - 1 ? () => _changePage(totalPages - 1) : null,
               ),
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildPaginationButton({required IconData icon, VoidCallback? onPressed}) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 2),
+      decoration: BoxDecoration(
+        color: onPressed != null
+            ? (_isDarkMode ? Colors.grey[800] : Colors.grey[100])
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(
+          color: onPressed != null ? _border : _disabledColor,
+          width: 0.5,
+        ),
+      ),
+      child: IconButton(
+        icon: Icon(
+          icon,
+          color: onPressed != null ? _rowText : _disabledColor,
+          size: 18,
+        ),
+        onPressed: onPressed,
+        padding: const EdgeInsets.all(8),
+        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
       ),
     );
   }
@@ -647,10 +714,10 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
   Widget _buildErrorDisplay(String message) {
     return Card(
       elevation: 0,
-      color: Colors.red.shade50,
+      color: _isDarkMode ? Colors.red[900]!.withValues(alpha: 0.3) : Colors.red.shade50,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8),
-        side: BorderSide(color: Colors.red.shade200),
+        side: BorderSide(color: _isDarkMode ? Colors.red[700]! : Colors.red.shade200),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -659,7 +726,10 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
           children: [
             Row(
               children: [
-                Icon(Icons.error_outline, color: Colors.red.shade700),
+                Icon(
+                  Icons.error_outline,
+                  color: _isDarkMode ? Colors.red[400] : Colors.red.shade700,
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
@@ -667,7 +737,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                     style: GoogleFonts.poppins(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
-                      color: Colors.red.shade700,
+                      color: _isDarkMode ? Colors.red[400] : Colors.red.shade700,
                     ),
                   ),
                 ),
@@ -678,7 +748,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
               message,
               style: GoogleFonts.poppins(
                 fontSize: 14,
-                color: Colors.red.shade700,
+                color: _isDarkMode ? Colors.red[400] : Colors.red.shade700,
               ),
             ),
           ],
@@ -690,18 +760,20 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
   @override
   Widget build(BuildContext context) {
     final validationError = _getValidationError();
-    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
 
     return Card(
-      elevation: _currentTableType == FlexibleDataTableType.modern ? 4 : 0,
-      shadowColor: _currentTableType == FlexibleDataTableType.modern ? widget.cardShadowColor : null,
-      color: widget.cardColor ?? (isDarkMode ? Colors.grey[850] : Colors.white),
+      elevation: _currentTableType == FlexibleDataTableType.modern ? (_isDarkMode ? 3 : 4) : 0,
+      shadowColor: _currentTableType == FlexibleDataTableType.modern
+          ? (widget.cardShadowColor ?? (_isDarkMode ? Colors.black38 : Colors.grey.shade400))
+          : null,
+      color: _cardBackgroundColor,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(_currentTableType == FlexibleDataTableType.modern ? 16.0 : 16.0),
         side: BorderSide(
-            color: _currentTableType == FlexibleDataTableType.standard
-                ? Colors.transparent
-                : (isDarkMode ? Colors.grey[700]! : Colors.grey.shade200)
+          color: _currentTableType == FlexibleDataTableType.standard
+              ? Colors.transparent
+              : _border,
+          width: 0.5,
         ),
       ),
       child: Padding(
@@ -725,8 +797,6 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
   }
 
   Widget _buildTable() {
-    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
-
     Map<String, dynamic> headerMap;
 
     if (widget.headers != null && widget.headers!.isNotEmpty) {
@@ -763,13 +833,13 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
           // For card layout, don't show traditional table headers
           if (_currentTableType == FlexibleDataTableType.card) {
             return Container(
-              decoration: _getContainerDecoration(isDarkMode),
+              decoration: _getContainerDecoration(),
               child: _buildTableBody(headerMap, tableWidth),
             );
           }
 
           return Container(
-            decoration: _getContainerDecoration(isDarkMode),
+            decoration: _getContainerDecoration(),
             child: Column(
               children: [
                 // Headers
@@ -802,75 +872,71 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     );
   }
 
-  BoxDecoration _getContainerDecoration(bool isDarkMode) {
+  BoxDecoration _getContainerDecoration() {
     switch (_currentTableType) {
       case FlexibleDataTableType.standard:
-      // Standard type - no borders, clean look
         return BoxDecoration(
           borderRadius: BorderRadius.circular(4),
-          color: isDarkMode ? Colors.grey[900] : Colors.white,
+          color: _surfaceColor,
         );
       case FlexibleDataTableType.bordered:
         return BoxDecoration(
           border: Border.all(color: _border, width: 1),
           borderRadius: BorderRadius.circular(4),
-          color: isDarkMode ? Colors.grey[900] : Colors.white,
+          color: _surfaceColor,
         );
       case FlexibleDataTableType.modern:
-      // Modern: Premium look with gradients, shadows, and rounded corners
         return BoxDecoration(
           borderRadius: BorderRadius.circular(16),
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [
-              isDarkMode ? Colors.grey[850]! : Colors.white,
-              isDarkMode ? Colors.grey[900]! : Colors.grey.shade50,
-            ],
+            colors: _isDarkMode
+                ? [Colors.grey[850]!, Colors.grey[900]!]
+                : [Colors.white, Colors.grey.shade50],
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: isDarkMode ? 0.3 : 0.1),
+              color: Colors.black.withValues(alpha: _isDarkMode ? 0.3 : 0.1),
               blurRadius: 20,
               offset: const Offset(0, 8),
               spreadRadius: 2,
             ),
             BoxShadow(
-              color: Colors.black.withValues(alpha: isDarkMode ? 0.1 : 0.05),
+              color: Colors.black.withValues(alpha: _isDarkMode ? 0.1 : 0.05),
               blurRadius: 10,
               offset: const Offset(0, 4),
             ),
           ],
           border: Border.all(
-            color: isDarkMode ? Colors.white.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.05),
+            color: _isDarkMode ? Colors.white.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.05),
             width: 1,
           ),
         );
       case FlexibleDataTableType.minimal:
-      // Minimal: Ultra-clean with transparent background
         return BoxDecoration(
           color: Colors.transparent,
         );
       case FlexibleDataTableType.striped:
         return BoxDecoration(
-          border: Border.all(color: _border.withValues(alpha: 0.5)),
+          border: Border.all(color: _border.withValues(alpha: _isDarkMode ? 0.3 : 0.5)),
           borderRadius: BorderRadius.circular(4),
-          color: isDarkMode ? Colors.grey[900] : Colors.white,
+          color: _surfaceColor,
         );
       case FlexibleDataTableType.compact:
         return BoxDecoration(
           border: Border.all(color: _border.withValues(alpha: 0.3)),
           borderRadius: BorderRadius.circular(2),
-          color: isDarkMode ? Colors.grey[900] : Colors.white,
+          color: _surfaceColor,
         );
       case FlexibleDataTableType.card:
         return BoxDecoration(
-          color: isDarkMode ? Colors.grey[900] : Colors.white,
+          color: _surfaceColor,
         );
       default:
         return BoxDecoration(
           borderRadius: BorderRadius.circular(4),
-          color: isDarkMode ? Colors.grey[900] : Colors.white,
+          color: _surfaceColor,
         );
     }
   }
@@ -879,11 +945,10 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     switch (_currentTableType) {
       case FlexibleDataTableType.standard:
         return BoxDecoration(
-          color: widget.headerColor,
+          color: _headerColorFinal,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
         );
       case FlexibleDataTableType.modern:
-      // Modern: Premium header with gradient and shadow
         return BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
@@ -903,44 +968,54 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
           ],
         );
       case FlexibleDataTableType.minimal:
-      // Minimal: No background, just transparent
         return BoxDecoration(
           color: Colors.transparent,
         );
       case FlexibleDataTableType.striped:
         return BoxDecoration(
-          color: widget.headerColor,
+          color: _headerColorFinal,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
         );
       case FlexibleDataTableType.compact:
         return BoxDecoration(
-          color: widget.headerColor,
+          color: _headerColorFinal,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(2)),
         );
       case FlexibleDataTableType.bordered:
         return BoxDecoration(
-          color: widget.headerColor,
+          color: _headerColorFinal,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
         );
       default:
         return BoxDecoration(
-          color: widget.headerColor,
+          color: _headerColorFinal,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
         );
     }
   }
 
   TableRow _buildTableRow(T item, Map<String, dynamic> headerMap, int index) {
-    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     final cells = <Widget>[];
 
     if (widget.showCheckboxColumn) {
       cells.add(
         SizedBox(
           width: 50,
-          child: Checkbox(
-            value: widget.selectedItems?.contains(item) ?? false,
-            onChanged: (value) => widget.onSelectItem?.call(value, item),
+          child: Theme(
+            data: Theme.of(context).copyWith(
+              checkboxTheme: CheckboxThemeData(
+                fillColor: WidgetStateProperty.resolveWith((states) {
+                  if (states.contains(WidgetState.selected)) {
+                    return widget.primaryColor;
+                  }
+                  return _isDarkMode ? Colors.grey[700] : Colors.grey[300];
+                }),
+              ),
+            ),
+            child: Checkbox(
+              value: widget.selectedItems?.contains(item) ?? false,
+              onChanged: (value) => widget.onSelectItem?.call(value, item),
+            ),
           ),
         ),
       );
@@ -980,7 +1055,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
 
     return TableRow(
       decoration: BoxDecoration(
-        color: _getRowColor(index, isDarkMode),
+        color: _getRowColor(index),
         border: _getRowBorder(),
       ),
       children: cells,
@@ -993,7 +1068,6 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       case FlexibleDataTableType.card:
         return null; // No borders for these types
       case FlexibleDataTableType.minimal:
-      // Minimal: Only subtle bottom lines
         return Border(
           bottom: BorderSide(
             color: _border.withValues(alpha: 0.1),
@@ -1001,7 +1075,6 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
           ),
         );
       case FlexibleDataTableType.modern:
-      // Modern: Very subtle borders with glow effect
         return Border(
           bottom: BorderSide(
             color: widget.primaryColor.withValues(alpha: 0.1),
@@ -1012,7 +1085,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       case FlexibleDataTableType.compact:
         return Border(
           bottom: BorderSide(
-            color: _border.withValues(alpha: 0.3),
+            color: _border.withValues(alpha: _isDarkMode ? 0.2 : 0.3),
             width: 0.5,
           ),
         );
@@ -1031,9 +1104,14 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
         height: widget.headerHeight,
         alignment: Alignment.center,
         child: Theme(
-          data: ThemeData(
+          data: Theme.of(context).copyWith(
             checkboxTheme: CheckboxThemeData(
-              fillColor: WidgetStateProperty.all(_checkboxColor),
+              fillColor: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.selected)) {
+                  return widget.primaryColor;
+                }
+                return _isDarkMode ? Colors.grey[700] : Colors.grey[300];
+              }),
             ),
           ),
           child: Checkbox(
@@ -1207,16 +1285,12 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
   }
 
   Widget _buildTableTypeSelector() {
-    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
-    final backgroundColor = isDarkMode ? Colors.grey.shade900 : Colors.white;
-    final borderColor = isDarkMode ? Colors.grey.shade700 : Colors.grey.shade300;
-
     return Container(
       height: 40,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(8),
-        color: backgroundColor,
-        border: Border.all(color: borderColor),
+        color: _surfaceColor,
+        border: Border.all(color: _border),
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(7),
@@ -1234,6 +1308,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                 child: DropdownButton<FlexibleDataTableType>(
                   value: _currentTableType,
                   isDense: true,
+                  dropdownColor: _surfaceColor,
                   icon: Icon(
                     Icons.table_chart,
                     color: widget.primaryColor,
@@ -1247,6 +1322,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                         style: GoogleFonts.poppins(
                           fontSize: 12,
                           fontWeight: FontWeight.w500,
+                          color: _rowText,
                         ),
                       ),
                     );
@@ -1291,6 +1367,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       data: Theme.of(context).copyWith(
         popupMenuTheme: PopupMenuThemeData(
           elevation: 6,
+          color: _dialogBackgroundColor,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
           ),
@@ -1299,9 +1376,6 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       child: PopupMenuButton<String>(
         offset: const Offset(-4, 38),
         icon: null,
-        color: Theme.of(context).brightness == Brightness.dark
-            ? Colors.grey.shade800
-            : Colors.white,
         tooltip: 'Export options',
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
@@ -1356,12 +1430,12 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                 Container(
                   padding: const EdgeInsets.all(4),
                   decoration: BoxDecoration(
-                    color: Colors.green.shade100,
+                    color: _isDarkMode ? Colors.green[800] : Colors.green.shade100,
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Icon(
                     Icons.table_chart_rounded,
-                    color: Colors.green.shade700,
+                    color: _isDarkMode ? Colors.green[300] : Colors.green.shade700,
                     size: 14,
                   ),
                 ),
@@ -1372,6 +1446,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                     style: GoogleFonts.poppins(
                       fontWeight: FontWeight.w500,
                       fontSize: 12,
+                      color: _rowText,
                     ),
                   ),
                 ),
@@ -1389,12 +1464,12 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                 Container(
                   padding: const EdgeInsets.all(4),
                   decoration: BoxDecoration(
-                    color: Colors.red.shade100,
+                    color: _isDarkMode ? Colors.red[800] : Colors.red.shade100,
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Icon(
                     Icons.picture_as_pdf_rounded,
-                    color: Colors.red.shade700,
+                    color: _isDarkMode ? Colors.red[300] : Colors.red.shade700,
                     size: 14,
                   ),
                 ),
@@ -1405,6 +1480,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                     style: GoogleFonts.poppins(
                       fontWeight: FontWeight.w500,
                       fontSize: 12,
+                      color: _rowText,
                     ),
                   ),
                 ),
@@ -1423,16 +1499,33 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       child: TextField(
         controller: _searchController,
         onChanged: _filterData,
+        style: GoogleFonts.poppins(
+          color: _rowText,
+          fontSize: 14,
+        ),
         decoration: InputDecoration(
           hintText: 'Search',
-          prefixIcon: const Icon(Icons.search),
+          hintStyle: GoogleFonts.poppins(
+            color: _subtleTextColor,
+            fontSize: 14,
+          ),
+          prefixIcon: Icon(
+            Icons.search,
+            color: _subtleTextColor,
+          ),
+          filled: true,
+          fillColor: _surfaceColor,
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
-            borderSide: BorderSide(color: Colors.grey.shade300),
+            borderSide: BorderSide(color: _border),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
-            borderSide: BorderSide(color: Colors.grey.shade300),
+            borderSide: BorderSide(color: _border),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: widget.primaryColor, width: 2),
           ),
         ),
       ),
@@ -1443,12 +1536,6 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     const int allItemsValue = -1;
     final List<dynamic> pageSizes = [5, 10, 25, 50, 100, allItemsValue];
 
-    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
-    final backgroundColor = isDarkMode ? Colors.grey.shade900 : Colors.white;
-    final borderColor = isDarkMode ? Colors.grey.shade700 : Colors.grey.shade300;
-    final textColor = isDarkMode ? Colors.white : Colors.grey.shade800;
-    final labelColor = isDarkMode ? Colors.grey.shade400 : Colors.grey.shade600;
-
     const double dropdownWidth = 80;
 
     return Container(
@@ -1456,9 +1543,9 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       width: dropdownWidth,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(8),
-        color: backgroundColor,
+        color: _surfaceColor,
         border: Border.all(
-          color: borderColor,
+          color: _border,
           width: 1,
         ),
         boxShadow: [
@@ -1489,6 +1576,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                       isExpanded: true,
                       value: _pageSize == widget.totalItems ? allItemsValue : _pageSize,
                       isDense: true,
+                      dropdownColor: _surfaceColor,
                       icon: Icon(
                         Icons.arrow_drop_down,
                         color: widget.primaryColor,
@@ -1513,10 +1601,9 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                         }).toList();
                       },
                       elevation: 4,
-                      dropdownColor: backgroundColor,
                       borderRadius: BorderRadius.circular(8),
                       style: GoogleFonts.poppins(
-                        color: textColor,
+                        color: _rowText,
                         fontSize: 13,
                       ),
                       alignment: AlignmentDirectional.centerStart,
@@ -1546,7 +1633,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                                       color: isSelected ? widget.primaryColor : Colors.transparent,
                                       border: isSelected
                                           ? null
-                                          : Border.all(color: labelColor, width: 1),
+                                          : Border.all(color: _subtleTextColor, width: 1),
                                     ),
                                   ),
                                   Expanded(
@@ -1555,7 +1642,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                                       style: GoogleFonts.poppins(
                                         fontSize: 13,
                                         fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                                        color: isSelected ? widget.primaryColor : textColor,
+                                        color: isSelected ? widget.primaryColor : _rowText,
                                       ),
                                       overflow: TextOverflow.ellipsis,
                                     ),
@@ -1866,17 +1953,13 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
               borderRadius: BorderRadius.circular(16.0),
             ),
             elevation: 8,
-            backgroundColor: Theme.of(context).brightness == Brightness.dark
-                ? Colors.grey.shade900
-                : Colors.white,
+            backgroundColor: _dialogBackgroundColor,
             child: Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(16.0),
                 border: Border.all(
-                  color: Theme.of(context).brightness == Brightness.dark
-                      ? Colors.grey.shade800
-                      : Colors.grey.shade300,
+                  color: _dialogBorderColor,
                   width: 1,
                 ),
               ),
@@ -1902,9 +1985,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                     style: GoogleFonts.poppins(
                       fontSize: 18,
                       fontWeight: FontWeight.w600,
-                      color: Theme.of(context).brightness == Brightness.dark
-                          ? Colors.white
-                          : Colors.grey.shade800,
+                      color: _rowText,
                     ),
                     textAlign: TextAlign.center,
                   ),
@@ -1913,9 +1994,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                     'Please wait while we prepare your file...',
                     style: GoogleFonts.poppins(
                       fontSize: 14,
-                      color: Theme.of(context).brightness == Brightness.dark
-                          ? Colors.grey.shade400
-                          : Colors.grey.shade600,
+                      color: _subtleTextColor,
                     ),
                     textAlign: TextAlign.center,
                   ),
@@ -1939,17 +2018,13 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
           borderRadius: BorderRadius.circular(16.0),
         ),
         elevation: 8,
-        backgroundColor: Theme.of(context).brightness == Brightness.dark
-            ? Colors.grey.shade900
-            : Colors.white,
+        backgroundColor: _dialogBackgroundColor,
         child: Container(
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16.0),
             border: Border.all(
-              color: Theme.of(context).brightness == Brightness.dark
-                  ? Colors.grey.shade800
-                  : Colors.grey.shade300,
+              color: _dialogBorderColor,
               width: 1,
             ),
           ),
@@ -1960,12 +2035,12 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                 width: 72,
                 height: 72,
                 decoration: BoxDecoration(
-                  color: Colors.green.shade50,
+                  color: _isDarkMode ? Colors.green[800]!.withValues(alpha: 0.3) : Colors.green.shade50,
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
                   Icons.check_circle_rounded,
-                  color: Colors.green.shade600,
+                  color: _isDarkMode ? Colors.green[400] : Colors.green.shade600,
                   size: 40,
                 ),
               ),
@@ -1975,7 +2050,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                 style: GoogleFonts.poppins(
                   fontSize: 20,
                   fontWeight: FontWeight.w600,
-                  color: Colors.green.shade700,
+                  color: _isDarkMode ? Colors.green[400] : Colors.green.shade700,
                 ),
                 textAlign: TextAlign.center,
               ),
@@ -1983,14 +2058,10 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Theme.of(context).brightness == Brightness.dark
-                      ? Colors.grey.shade800
-                      : Colors.grey.shade100,
+                  color: _isDarkMode ? Colors.grey[800] : Colors.grey.shade100,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: Theme.of(context).brightness == Brightness.dark
-                        ? Colors.grey.shade700
-                        : Colors.grey.shade300,
+                    color: _border,
                     width: 1,
                   ),
                 ),
@@ -2005,9 +2076,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                           style: GoogleFonts.poppins(
                             fontWeight: FontWeight.w600,
                             fontSize: 14,
-                            color: Theme.of(context).brightness == Brightness.dark
-                                ? Colors.grey.shade300
-                                : Colors.grey.shade800,
+                            color: _rowText,
                           ),
                         ),
                         const SizedBox(width: 8),
@@ -2016,9 +2085,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                             entry.value,
                             style: GoogleFonts.poppins(
                               fontSize: 14,
-                              color: Theme.of(context).brightness == Brightness.dark
-                                  ? Colors.grey.shade400
-                                  : Colors.grey.shade700,
+                              color: _subtleTextColor,
                             ),
                           ),
                         ),
@@ -2062,17 +2129,13 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
           borderRadius: BorderRadius.circular(16.0),
         ),
         elevation: 8,
-        backgroundColor: Theme.of(context).brightness == Brightness.dark
-            ? Colors.grey.shade900
-            : Colors.white,
+        backgroundColor: _dialogBackgroundColor,
         child: Container(
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16.0),
             border: Border.all(
-              color: Theme.of(context).brightness == Brightness.dark
-                  ? Colors.grey.shade800
-                  : Colors.grey.shade300,
+              color: _dialogBorderColor,
               width: 1,
             ),
           ),
@@ -2083,12 +2146,12 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                 width: 72,
                 height: 72,
                 decoration: BoxDecoration(
-                  color: Colors.red.shade50,
+                  color: _isDarkMode ? Colors.red[800]!.withValues(alpha: 0.3) : Colors.red.shade50,
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
                   Icons.error_rounded,
-                  color: Colors.red.shade600,
+                  color: _isDarkMode ? Colors.red[400] : Colors.red.shade600,
                   size: 40,
                 ),
               ),
@@ -2098,7 +2161,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                 style: GoogleFonts.poppins(
                   fontSize: 20,
                   fontWeight: FontWeight.w600,
-                  color: Colors.red.shade700,
+                  color: _isDarkMode ? Colors.red[400] : Colors.red.shade700,
                 ),
                 textAlign: TextAlign.center,
               ),
@@ -2109,14 +2172,10 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                 ),
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Theme.of(context).brightness == Brightness.dark
-                      ? Colors.grey.shade800
-                      : Colors.grey.shade100,
+                  color: _isDarkMode ? Colors.grey[800] : Colors.grey.shade100,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: Theme.of(context).brightness == Brightness.dark
-                        ? Colors.grey.shade700
-                        : Colors.grey.shade300,
+                    color: _border,
                     width: 1,
                   ),
                 ),
@@ -2125,9 +2184,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                     message,
                     style: GoogleFonts.poppins(
                       fontSize: 14,
-                      color: Theme.of(context).brightness == Brightness.dark
-                          ? Colors.grey.shade400
-                          : Colors.grey.shade700,
+                      color: _subtleTextColor,
                     ),
                   ),
                 ),
