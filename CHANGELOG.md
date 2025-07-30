@@ -1,3 +1,9 @@
+## [1.1.0] - 2025-07-30
+
+### Updated
+- This version added bottom scroll bar
+- Also added row tap function
+
 ## [1.0.9] - 2025-07-05
 
 ### Updated

@@ -68,6 +68,10 @@ class FlexibleDataTable<T> extends StatefulWidget {
   final Color? cardShadowColor;
   final bool showTableTypeSelector;
 
+  // NEW: Row click functionality
+  final Function(T rowData)? onRowTap;
+  final bool enableRowClick;
+
   const FlexibleDataTable({
     super.key,
     required this.data,
@@ -113,6 +117,10 @@ class FlexibleDataTable<T> extends StatefulWidget {
     this.cardBorderRadius,
     this.cardShadowColor,
     this.showTableTypeSelector = false,
+
+    // NEW: Row click parameters
+    this.onRowTap,
+    this.enableRowClick = true,
   });
 
   @override
@@ -343,22 +351,39 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       return _buildCardTableBody(pageData, headerMap);
     }
 
-    return SingleChildScrollView(
-      controller: _verticalScrollController,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        controller: _horizontalScrollController,
-        child: SizedBox(
-          width: tableWidth,
-          child: Table(
-            defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-            border: _getTableBorder(),
-            columnWidths: _buildColumnWidths(headerMap),
-            children: pageData.asMap().entries.map((entry) =>
-                _buildTableRow(entry.value, headerMap, entry.key)).toList(),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final availableWidth = constraints.maxWidth;
+        final needsHorizontalScroll = tableWidth > availableWidth;
+
+        final tableContent = SingleChildScrollView(
+          controller: _verticalScrollController,
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            controller: _horizontalScrollController,
+            child: SizedBox(
+              width: tableWidth,
+              child: Table(
+                defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+                border: _getTableBorder(),
+                columnWidths: _buildColumnWidths(headerMap),
+                children: pageData.asMap().entries.map((entry) =>
+                    _buildTableRow(entry.value, headerMap, entry.key)).toList(),
+              ),
+            ),
           ),
-        ),
-      ),
+        );
+
+        // Only show scrollbar if horizontal scrolling is needed
+        if (needsHorizontalScroll) {
+          return Scrollbar(
+            controller: _horizontalScrollController,
+            child: tableContent,
+          );
+        } else {
+          return tableContent;
+        }
+      },
     );
   }
 
@@ -375,33 +400,50 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
 
     emptyCells.add(Container(height: 100));
 
-    return Stack(
-      children: [
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          controller: _horizontalScrollController,
-          child: SizedBox(
-            width: tableWidth,
-            child: Table(
-              defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-              columnWidths: _buildColumnWidths(headerMap),
-              border: _getTableBorder(),
-              children: [
-                TableRow(children: emptyCells),
-              ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final availableWidth = constraints.maxWidth;
+        final needsHorizontalScroll = tableWidth > availableWidth;
+
+        final emptyContent = Stack(
+          children: [
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              controller: _horizontalScrollController,
+              child: SizedBox(
+                width: tableWidth,
+                child: Table(
+                  defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+                  columnWidths: _buildColumnWidths(headerMap),
+                  border: _getTableBorder(),
+                  children: [
+                    TableRow(children: emptyCells),
+                  ],
+                ),
+              ),
             ),
-          ),
-        ),
-        Center(
-          child: Text(
-            _searchQuery.isEmpty ? 'No data available' : 'No matching records found',
-            style: GoogleFonts.poppins(
-              fontSize: 14,
-              color: _subtleTextColor,
+            Center(
+              child: Text(
+                _searchQuery.isEmpty ? 'No data available' : 'No matching records found',
+                style: GoogleFonts.poppins(
+                  fontSize: 14,
+                  color: _subtleTextColor,
+                ),
+              ),
             ),
-          ),
-        ),
-      ],
+          ],
+        );
+
+        // Only show scrollbar if horizontal scrolling is needed
+        if (needsHorizontalScroll) {
+          return Scrollbar(
+            controller: _horizontalScrollController,
+            child: emptyContent,
+          );
+        } else {
+          return emptyContent;
+        }
+      },
     );
   }
 
@@ -418,7 +460,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
   Widget _buildCardRow(T item, Map<String, dynamic> headerMap, int index) {
     final map = widget.toTableDataMap(item);
 
-    return Container(
+    Widget cardContent = Container(
       margin: EdgeInsets.all(widget.cardMargin ?? 8),
       child: Card(
         elevation: widget.cardElevation ?? (_isDarkMode ? 2 : 3),
@@ -542,6 +584,19 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
         ),
       ),
     );
+
+    // NEW: Add row click functionality for cards
+    if (widget.enableRowClick && widget.onRowTap != null) {
+      return InkWell(
+        onTap: () => widget.onRowTap!(item),
+        borderRadius: widget.cardBorderRadius ?? BorderRadius.circular(12),
+        hoverColor: widget.primaryColor.withValues(alpha: 0.05),
+        splashColor: widget.primaryColor.withValues(alpha: 0.1),
+        child: cardContent,
+      );
+    }
+
+    return cardContent;
   }
 
   Widget _buildPagination() {
@@ -687,21 +742,218 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       });
     });
   }
+  // In the _buildTable method, replace the existing implementation with this:
 
+  Widget _buildTable() {
+    Map<String, dynamic> headerMap;
+
+    if (widget.headers != null && widget.headers!.isNotEmpty) {
+      headerMap = Map<String, dynamic>.from(widget.headers!);
+    }
+    else if (widget.data.isNotEmpty) {
+      headerMap = Map<String, dynamic>.from(widget.toTableDataMap(widget.data.first));
+    }
+    else if (_defaultHeaderMap != null && _defaultHeaderMap!.isNotEmpty) {
+      headerMap = _defaultHeaderMap!;
+    }
+    else if (widget.customHeaderBuilders != null && widget.customHeaderBuilders!.isNotEmpty) {
+      headerMap = Map<String, dynamic>.fromIterable(
+          widget.customHeaderBuilders!.keys,
+          value: (_) => null
+      );
+    }
+    else {
+      headerMap = {'ID': null, 'Name': null, 'Description': null};
+    }
+
+    final double totalColumnWidth = _calculateTotalWidth(headerMap);
+
+    return LayoutBuilder(
+        builder: (context, constraints) {
+          final double availableWidth = constraints.maxWidth;
+          final double requestedMinWidth = widget.minWidth ?? 0;
+
+          final double tableWidth = math.max(
+              totalColumnWidth,
+              math.max(availableWidth, requestedMinWidth)
+          );
+
+          // For card layout, don't show traditional table headers
+          if (_currentTableType == FlexibleDataTableType.card) {
+            return Container(
+              decoration: _getContainerDecoration(),
+              child: _buildTableBody(headerMap, tableWidth),
+            );
+          }
+
+          // Check if horizontal scrolling is needed
+          final needsHorizontalScroll = tableWidth > availableWidth;
+
+          final tableContent = Container(
+            decoration: _getContainerDecoration(),
+            child: Column(
+              children: [
+                // Headers (synchronized with body scrolling)
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  controller: _headerScrollController,
+                  physics: const NeverScrollableScrollPhysics(), // Disable direct header scrolling
+                  child: SizedBox(
+                    width: tableWidth,
+                    height: widget.headerHeight,
+                    child: Table(
+                      columnWidths: _buildColumnWidths(headerMap),
+                      children: [
+                        TableRow(
+                          decoration: _getHeaderDecoration(),
+                          children: _buildHeaderCells(headerMap).map((cell) =>
+                              SizedBox(height: widget.headerHeight, child: cell)
+                          ).toList(),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                // Table body
+                Expanded(
+                  child: _buildTableBodyWithoutScrollbar(headerMap, tableWidth),
+                ),
+              ],
+            ),
+          );
+
+          // Wrap with scrollbar at the container level if horizontal scrolling is needed
+          if (needsHorizontalScroll) {
+            return Scrollbar(
+              controller: _horizontalScrollController,
+              thumbVisibility: false, // Hidden by default
+              trackVisibility: false, // Hidden by default
+              interactive: true,     // Allows interaction
+              child: tableContent,
+            );
+          } else {
+            return tableContent;
+          }
+        }
+    );
+  }
+
+// New method: _buildTableBodyWithoutScrollbar (modified version of _buildTableBody without scrollbar)
+  Widget _buildTableBodyWithoutScrollbar(Map<String, dynamic> headerMap, double tableWidth) {
+    if (_filteredData.isEmpty) {
+      return _buildEmptyStateWithoutScrollbar(headerMap, tableWidth);
+    }
+
+    final startIndex = widget.isServerSide ? 0 : _currentPage * _pageSize;
+    final endIndex = widget.isServerSide
+        ? _filteredData.length
+        : math.min(startIndex + _pageSize, _filteredData.length);
+
+    final pageData = widget.isServerSide
+        ? _filteredData
+        : _filteredData.sublist(startIndex, endIndex);
+
+    return SingleChildScrollView(
+      controller: _verticalScrollController,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        controller: _horizontalScrollController,
+        child: SizedBox(
+          width: tableWidth,
+          child: Table(
+            defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+            border: _getTableBorder(),
+            columnWidths: _buildColumnWidths(headerMap),
+            children: pageData.asMap().entries.map((entry) {
+              final tableRow = _buildTableRow(entry.value, headerMap, entry.key);
+
+              // Add row click functionality by wrapping TableRow children with InkWell
+              if (widget.enableRowClick && widget.onRowTap != null) {
+                final wrappedChildren = tableRow.children!.map((cell) {
+                  return InkWell(
+                    onTap: () => widget.onRowTap!(entry.value),
+                    hoverColor: widget.primaryColor.withValues(alpha: 0.05),
+                    splashColor: widget.primaryColor.withValues(alpha: 0.1),
+                    child: cell,
+                  );
+                }).toList();
+
+                return TableRow(
+                  decoration: tableRow.decoration,
+                  children: wrappedChildren,
+                );
+              }
+
+              return tableRow;
+            }).toList(),
+          ),
+        ),
+      ),
+    );
+  }
+
+// New method: _buildEmptyStateWithoutScrollbar
+  Widget _buildEmptyStateWithoutScrollbar(Map<String, dynamic> headerMap, double tableWidth) {
+    final List<Widget> emptyCells = [];
+
+    if (widget.showCheckboxColumn) {
+      emptyCells.add(Container(height: 100));
+    }
+
+    for (int i = 0; i < headerMap.length; i++) {
+      emptyCells.add(Container(height: 100));
+    }
+
+    emptyCells.add(Container(height: 100));
+
+    final emptyContent = Stack(
+      children: [
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          controller: _horizontalScrollController,
+          child: SizedBox(
+            width: tableWidth,
+            child: Table(
+              defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+              columnWidths: _buildColumnWidths(headerMap),
+              border: _getTableBorder(),
+              children: [
+                TableRow(children: emptyCells),
+              ],
+            ),
+          ),
+        ),
+        Center(
+          child: Text(
+            _searchQuery.isEmpty ? 'No data available' : 'No matching records found',
+            style: GoogleFonts.poppins(
+              fontSize: 14,
+              color: _subtleTextColor,
+            ),
+          ),
+        ),
+      ],
+    );
+
+    return emptyContent;
+  }
+
+// Update the _setupScrollControllers method for better synchronization
   void _setupScrollControllers() {
     _horizontalScrollController.addListener(() {
-      if (_headerScrollController.position.pixels != _horizontalScrollController.position.pixels) {
+      if (_headerScrollController.hasClients &&
+          _headerScrollController.position.pixels != _horizontalScrollController.position.pixels) {
         _headerScrollController.jumpTo(_horizontalScrollController.position.pixels);
       }
     });
 
     _headerScrollController.addListener(() {
-      if (_horizontalScrollController.position.pixels != _headerScrollController.position.pixels) {
+      if (_horizontalScrollController.hasClients &&
+          _horizontalScrollController.position.pixels != _headerScrollController.position.pixels) {
         _horizontalScrollController.jumpTo(_headerScrollController.position.pixels);
       }
     });
   }
-
   String? _getValidationError() {
     if (!widget.isServerSide) return null;
 
@@ -793,82 +1045,6 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildTable() {
-    Map<String, dynamic> headerMap;
-
-    if (widget.headers != null && widget.headers!.isNotEmpty) {
-      headerMap = Map<String, dynamic>.from(widget.headers!);
-    }
-    else if (widget.data.isNotEmpty) {
-      headerMap = Map<String, dynamic>.from(widget.toTableDataMap(widget.data.first));
-    }
-    else if (_defaultHeaderMap != null && _defaultHeaderMap!.isNotEmpty) {
-      headerMap = _defaultHeaderMap!;
-    }
-    else if (widget.customHeaderBuilders != null && widget.customHeaderBuilders!.isNotEmpty) {
-      headerMap = Map<String, dynamic>.fromIterable(
-          widget.customHeaderBuilders!.keys,
-          value: (_) => null
-      );
-    }
-    else {
-      headerMap = {'ID': null, 'Name': null, 'Description': null};
-    }
-
-    final double totalColumnWidth = _calculateTotalWidth(headerMap);
-
-    return LayoutBuilder(
-        builder: (context, constraints) {
-          final double availableWidth = constraints.maxWidth;
-          final double requestedMinWidth = widget.minWidth ?? 0;
-
-          final double tableWidth = math.max(
-              totalColumnWidth,
-              math.max(availableWidth, requestedMinWidth)
-          );
-
-          // For card layout, don't show traditional table headers
-          if (_currentTableType == FlexibleDataTableType.card) {
-            return Container(
-              decoration: _getContainerDecoration(),
-              child: _buildTableBody(headerMap, tableWidth),
-            );
-          }
-
-          return Container(
-            decoration: _getContainerDecoration(),
-            child: Column(
-              children: [
-                // Headers
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  controller: _headerScrollController,
-                  child: SizedBox(
-                    width: tableWidth,
-                    height: widget.headerHeight,
-                    child: Table(
-                      columnWidths: _buildColumnWidths(headerMap),
-                      children: [
-                        TableRow(
-                          decoration: _getHeaderDecoration(),
-                          children: _buildHeaderCells(headerMap).map((cell) =>
-                              SizedBox(height: widget.headerHeight, child: cell)
-                          ).toList(),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                Expanded(
-                  child: _buildTableBody(headerMap, tableWidth),
-                ),
-              ],
-            ),
-          );
-        }
     );
   }
 
@@ -1053,13 +1229,16 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       ),
     );
 
-    return TableRow(
+    // NEW: Wrap TableRow with InkWell for row click functionality
+    final tableRow = TableRow(
       decoration: BoxDecoration(
         color: _getRowColor(index),
         border: _getRowBorder(),
       ),
       children: cells,
     );
+
+    return tableRow;
   }
 
   Border? _getRowBorder() {
