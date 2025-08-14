@@ -1,3 +1,10 @@
+## [1.1.1] - 2025-08-14
+
+### Updated
+- Customizable Headers: Column visibility selector with automatic persistence using SharedPreferences
+- Header Borders: Full column borders in header row when table type is set to bordered
+- Additional Search Fields: Search through hidden fields that aren't displayed as visible columns
+
 ## [1.1.0] - 2025-07-30
 
 ### Updated

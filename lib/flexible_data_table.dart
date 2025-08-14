@@ -11,6 +11,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:universal_html/html.dart' as html;
 import 'package:excel/excel.dart' as excel;
+import 'package:shared_preferences/shared_preferences.dart';
 
 // Enum for different table types
 enum FlexibleDataTableType {
@@ -68,9 +69,20 @@ class FlexibleDataTable<T> extends StatefulWidget {
   final Color? cardShadowColor;
   final bool showTableTypeSelector;
 
-  // NEW: Row click functionality
+  // Row click functionality
   final Function(T rowData)? onRowTap;
   final bool enableRowClick;
+
+  // NEW: Customizable Headers functionality
+  final Map<String, String>? availableHeaders; // All possible headers {key: display_name}
+  final List<String>? initialVisibleHeaders; // Initially visible headers
+  final bool showHeaderSelector; // Show header customization UI
+  final Function(List<String> visibleHeaders)? onHeaderVisibilityChanged; // Callback when headers change
+  final String? headerSelectorTooltip; // Tooltip for header selector button
+
+  // NEW: Additional searchable fields functionality
+  final List<String>? additionalSearchableFields; // Fields to include in search but not display
+  final String? searchHint; // Custom search hint text
 
   const FlexibleDataTable({
     super.key,
@@ -118,9 +130,20 @@ class FlexibleDataTable<T> extends StatefulWidget {
     this.cardShadowColor,
     this.showTableTypeSelector = false,
 
-    // NEW: Row click parameters
+    // Row click parameters
     this.onRowTap,
     this.enableRowClick = true,
+
+    // NEW: Customizable Headers parameters
+    this.availableHeaders,
+    this.initialVisibleHeaders,
+    this.showHeaderSelector = false,
+    this.onHeaderVisibilityChanged,
+    this.headerSelectorTooltip = 'Customize columns',
+
+    // NEW: Additional searchable fields parameters
+    this.additionalSearchableFields,
+    this.searchHint,
   });
 
   @override
@@ -137,6 +160,12 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
   String _searchQuery = '';
   late int _effectiveTotalItems;
   late FlexibleDataTableType _currentTableType;
+
+  // NEW: Header customization state with persistence
+  late Set<String> _visibleHeaders;
+  late Map<String, String> _availableHeadersMap;
+  bool _preferencesLoaded = false;
+  String? _tableId; // Unique identifier for this table's preferences
 
   final ScrollController _horizontalScrollController = ScrollController();
   final ScrollController _verticalScrollController = ScrollController();
@@ -208,6 +237,26 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     }
   }
 
+  // NEW: Get filtered header map based on visible headers with persistence
+  Map<String, dynamic> _getVisibleHeaderMap() {
+    // Don't build until preferences are loaded
+    if (!_preferencesLoaded) {
+      return {};
+    }
+
+    Map<String, dynamic> fullHeaderMap = _getHeaderMap();
+
+    // Filter based on visible headers
+    Map<String, dynamic> visibleHeaderMap = {};
+    for (String key in _visibleHeaders) {
+      if (fullHeaderMap.containsKey(key)) {
+        visibleHeaderMap[key] = fullHeaderMap[key];
+      }
+    }
+
+    return visibleHeaderMap;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -218,6 +267,105 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     _setupScrollControllers();
     _updateEffectiveTotalItems();
     _updateDefaultHeaderMap();
+
+    // NEW: Generate unique table ID for preferences
+    _tableId = _generateTableId();
+
+    // NEW: Initialize header customization with persistence
+    _initializeHeadersWithPersistence();
+  }
+
+  // NEW: Generate unique table ID based on widget properties
+  String _generateTableId() {
+    final baseId = widget.fileName.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
+    return 'table_${baseId}_headers';
+  }
+
+  // NEW: Initialize headers with persistent storage
+  Future<void> _initializeHeadersWithPersistence() async {
+    try {
+      // Initialize available headers
+      if (widget.availableHeaders != null && widget.availableHeaders!.isNotEmpty) {
+        _availableHeadersMap = Map<String, String>.from(widget.availableHeaders!);
+      } else {
+        // Auto-generate from data or default headers
+        Map<String, dynamic> sourceMap = _getHeaderMap();
+        _availableHeadersMap = sourceMap.map((key, value) => MapEntry(key, key));
+      }
+
+      // Load preferences
+      await _loadHeaderPreferences();
+
+      setState(() {
+        _preferencesLoaded = true;
+      });
+
+      debugPrint('✅ FlexibleDataTable: Preferences loaded for $_tableId');
+    } catch (e) {
+      debugPrint('⚠ FlexibleDataTable: Error loading preferences: $e');
+      // Fallback to defaults
+      _setDefaultHeaders();
+      setState(() {
+        _preferencesLoaded = true;
+      });
+    }
+  }
+
+  // NEW: Load header preferences from SharedPreferences
+  Future<void> _loadHeaderPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedHeaders = prefs.getStringList(_tableId!);
+
+    if (savedHeaders != null && savedHeaders.isNotEmpty) {
+      // Use saved preferences
+      _visibleHeaders = Set<String>.from(savedHeaders);
+      debugPrint('📂 Loaded saved headers: ${savedHeaders.length} columns');
+    } else {
+      // Use initial visible headers or defaults
+      _setDefaultHeaders();
+      debugPrint('🔧 Using default headers: ${_visibleHeaders.length} columns');
+    }
+
+    // Ensure visible headers only contain valid keys
+    _visibleHeaders = _visibleHeaders.intersection(_availableHeadersMap.keys.toSet());
+
+    // Save the current state (in case we cleaned up invalid headers)
+    await _saveHeaderPreferences();
+  }
+
+  // NEW: Set default headers
+  void _setDefaultHeaders() {
+    if (widget.initialVisibleHeaders != null && widget.initialVisibleHeaders!.isNotEmpty) {
+      _visibleHeaders = Set<String>.from(widget.initialVisibleHeaders!);
+    } else {
+      // Show all available headers by default
+      _visibleHeaders = Set<String>.from(_availableHeadersMap.keys);
+    }
+  }
+
+  // NEW: Save header preferences to SharedPreferences
+  Future<void> _saveHeaderPreferences() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_tableId!, _visibleHeaders.toList());
+      debugPrint('💾 Saved headers: ${_visibleHeaders.length} columns');
+    } catch (e) {
+      debugPrint('⚠ Error saving header preferences: $e');
+    }
+  }
+
+  // NEW: Handle header visibility changes with persistence
+  Future<void> _handleHeaderVisibilityChange(Set<String> newVisibleHeaders) async {
+    setState(() {
+      _visibleHeaders = Set<String>.from(newVisibleHeaders);
+    });
+
+    await _saveHeaderPreferences();
+
+    // Notify parent widget if callback provided
+    widget.onHeaderVisibilityChanged?.call(_visibleHeaders.toList());
+
+    debugPrint('🔄 Headers updated: ${_visibleHeaders.length} columns visible');
   }
 
   void _updateEffectiveTotalItems() {
@@ -237,9 +385,22 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
         if (_searchQuery.isNotEmpty) {
           _filteredData = widget.data.where((item) {
             final map = widget.toTableDataMap(item);
-            return map.values.any(
+
+            // Search in visible columns
+            bool foundInVisibleColumns = map.values.any(
                   (value) => value?.toString().toLowerCase().contains(_searchQuery) ?? false,
             );
+
+            // Search in additional searchable fields if specified
+            bool foundInAdditionalFields = false;
+            if (widget.additionalSearchableFields != null && widget.additionalSearchableFields!.isNotEmpty) {
+              foundInAdditionalFields = widget.additionalSearchableFields!.any((fieldKey) {
+                final fieldValue = map[fieldKey];
+                return fieldValue?.toString().toLowerCase().contains(_searchQuery) ?? false;
+              });
+            }
+
+            return foundInVisibleColumns || foundInAdditionalFields;
           }).toList();
         } else {
           _filteredData = List.from(widget.data);
@@ -252,6 +413,29 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       setState(() {
         _currentTableType = widget.tableType;
       });
+    }
+
+    // NEW: Handle header changes but preserve preferences
+    if (oldWidget.availableHeaders != widget.availableHeaders) {
+      _updateAvailableHeaders();
+    }
+  }
+
+  // NEW: Update available headers while preserving user preferences
+  void _updateAvailableHeaders() {
+    if (widget.availableHeaders != null && widget.availableHeaders!.isNotEmpty) {
+      final newAvailableHeaders = Map<String, String>.from(widget.availableHeaders!);
+
+      // Keep only headers that still exist in the new available headers
+      final validHeaders = _visibleHeaders.intersection(newAvailableHeaders.keys.toSet());
+
+      setState(() {
+        _availableHeadersMap = newAvailableHeaders;
+        _visibleHeaders = validHeaders;
+      });
+
+      // Save the updated preferences
+      _saveHeaderPreferences();
     }
   }
 
@@ -389,16 +573,44 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
 
   Widget _buildEmptyState(Map<String, dynamic> headerMap, double tableWidth) {
     final List<Widget> emptyCells = [];
+    int cellIndex = 0;
+    final totalCells = (widget.showCheckboxColumn ? 1 : 0) + headerMap.length + 1; // +1 for actions
+
+    // Helper function to get cell decoration for bordered table type
+    BoxDecoration? getCellDecoration(int currentIndex) {
+      if (_currentTableType != FlexibleDataTableType.bordered) {
+        return null;
+      }
+
+      return BoxDecoration(
+        border: Border(
+          right: currentIndex < totalCells - 1
+              ? BorderSide(color: _border, width: 1)
+              : BorderSide.none,
+        ),
+      );
+    }
 
     if (widget.showCheckboxColumn) {
-      emptyCells.add(Container(height: 100));
+      emptyCells.add(Container(
+        height: 100,
+        decoration: getCellDecoration(cellIndex),
+      ));
+      cellIndex++;
     }
 
     for (int i = 0; i < headerMap.length; i++) {
-      emptyCells.add(Container(height: 100));
+      emptyCells.add(Container(
+        height: 100,
+        decoration: getCellDecoration(cellIndex),
+      ));
+      cellIndex++;
     }
 
-    emptyCells.add(Container(height: 100));
+    emptyCells.add(Container(
+      height: 100,
+      decoration: getCellDecoration(cellIndex), // Last cell, no right border
+    ));
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -528,9 +740,10 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                 const SizedBox(height: 8),
               ],
 
-              // Data rows
+              // Data rows - NEW: Only show visible headers
               ...headerMap.keys.map((key) {
                 final value = map[key];
+                final displayName = _availableHeadersMap[key] ?? key;
                 return Padding(
                   padding: const EdgeInsets.symmetric(vertical: 6),
                   child: Row(
@@ -539,7 +752,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                       SizedBox(
                         width: 120,
                         child: Text(
-                          '$key:',
+                          '$displayName:',
                           style: GoogleFonts.poppins(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
@@ -585,7 +798,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       ),
     );
 
-    // NEW: Add row click functionality for cards
+    // Add row click functionality for cards
     if (widget.enableRowClick && widget.onRowTap != null) {
       return InkWell(
         onTap: () => widget.onRowTap!(item),
@@ -683,9 +896,22 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       _searchQuery = query.toLowerCase();
       _filteredData = widget.data.where((item) {
         final map = widget.toTableDataMap(item);
-        return map.values.any(
+
+        // Search in visible columns
+        bool foundInVisibleColumns = map.values.any(
               (value) => value?.toString().toLowerCase().contains(_searchQuery) ?? false,
         );
+
+        // Search in additional searchable fields if specified
+        bool foundInAdditionalFields = false;
+        if (widget.additionalSearchableFields != null && widget.additionalSearchableFields!.isNotEmpty) {
+          foundInAdditionalFields = widget.additionalSearchableFields!.any((fieldKey) {
+            final fieldValue = map[fieldKey];
+            return fieldValue?.toString().toLowerCase().contains(_searchQuery) ?? false;
+          });
+        }
+
+        return foundInVisibleColumns || foundInAdditionalFields;
       }).toList();
 
       if (_searchQuery.isNotEmpty) {
@@ -742,27 +968,36 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       });
     });
   }
-  // In the _buildTable method, replace the existing implementation with this:
 
   Widget _buildTable() {
-    Map<String, dynamic> headerMap;
-
-    if (widget.headers != null && widget.headers!.isNotEmpty) {
-      headerMap = Map<String, dynamic>.from(widget.headers!);
-    }
-    else if (widget.data.isNotEmpty) {
-      headerMap = Map<String, dynamic>.from(widget.toTableDataMap(widget.data.first));
-    }
-    else if (_defaultHeaderMap != null && _defaultHeaderMap!.isNotEmpty) {
-      headerMap = _defaultHeaderMap!;
-    }
-    else if (widget.customHeaderBuilders != null && widget.customHeaderBuilders!.isNotEmpty) {
-      headerMap = Map<String, dynamic>.fromIterable(
-          widget.customHeaderBuilders!.keys,
-          value: (_) => null
+    // NEW: Don't build table until preferences are loaded
+    if (!_preferencesLoaded) {
+      return Container(
+        decoration: _getContainerDecoration(),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text(
+                'Loading table preferences...',
+                style: GoogleFonts.poppins(
+                  color: _subtleTextColor,
+                  fontSize: 14,
+                ),
+              ),
+            ],
+          ),
+        ),
       );
     }
-    else {
+
+    // NEW: Use visible header map instead of full header map
+    Map<String, dynamic> headerMap = _getVisibleHeaderMap();
+
+    // Handle empty header map
+    if (headerMap.isEmpty) {
       headerMap = {'ID': null, 'Name': null, 'Description': null};
     }
 
@@ -838,7 +1073,6 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     );
   }
 
-// New method: _buildTableBodyWithoutScrollbar (modified version of _buildTableBody without scrollbar)
   Widget _buildTableBodyWithoutScrollbar(Map<String, dynamic> headerMap, double tableWidth) {
     if (_filteredData.isEmpty) {
       return _buildEmptyStateWithoutScrollbar(headerMap, tableWidth);
@@ -869,7 +1103,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
 
               // Add row click functionality by wrapping TableRow children with InkWell
               if (widget.enableRowClick && widget.onRowTap != null) {
-                final wrappedChildren = tableRow.children!.map((cell) {
+                final wrappedChildren = tableRow.children.map((cell) {
                   return InkWell(
                     onTap: () => widget.onRowTap!(entry.value),
                     hoverColor: widget.primaryColor.withValues(alpha: 0.05),
@@ -892,19 +1126,46 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     );
   }
 
-// New method: _buildEmptyStateWithoutScrollbar
   Widget _buildEmptyStateWithoutScrollbar(Map<String, dynamic> headerMap, double tableWidth) {
     final List<Widget> emptyCells = [];
+    int cellIndex = 0;
+    final totalCells = (widget.showCheckboxColumn ? 1 : 0) + headerMap.length + 1; // +1 for actions
+
+    // Helper function to get cell decoration for bordered table type
+    BoxDecoration? getCellDecoration(int currentIndex) {
+      if (_currentTableType != FlexibleDataTableType.bordered) {
+        return null;
+      }
+
+      return BoxDecoration(
+        border: Border(
+          right: currentIndex < totalCells - 1
+              ? BorderSide(color: _border, width: 1)
+              : BorderSide.none,
+        ),
+      );
+    }
 
     if (widget.showCheckboxColumn) {
-      emptyCells.add(Container(height: 100));
+      emptyCells.add(Container(
+        height: 100,
+        decoration: getCellDecoration(cellIndex),
+      ));
+      cellIndex++;
     }
 
     for (int i = 0; i < headerMap.length; i++) {
-      emptyCells.add(Container(height: 100));
+      emptyCells.add(Container(
+        height: 100,
+        decoration: getCellDecoration(cellIndex),
+      ));
+      cellIndex++;
     }
 
-    emptyCells.add(Container(height: 100));
+    emptyCells.add(Container(
+      height: 100,
+      decoration: getCellDecoration(cellIndex), // Last cell, no right border
+    ));
 
     final emptyContent = Stack(
       children: [
@@ -938,7 +1199,6 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     return emptyContent;
   }
 
-// Update the _setupScrollControllers method for better synchronization
   void _setupScrollControllers() {
     _horizontalScrollController.addListener(() {
       if (_headerScrollController.hasClients &&
@@ -954,6 +1214,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       }
     });
   }
+
   String? _getValidationError() {
     if (!widget.isServerSide) return null;
 
@@ -1161,6 +1422,12 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
         return BoxDecoration(
           color: _headerColorFinal,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
+          border: Border(
+            top: BorderSide(color: _border, width: 1),
+            left: BorderSide(color: _border, width: 1),
+            right: BorderSide(color: _border, width: 1),
+            bottom: BorderSide(color: _border, width: 1),
+          ),
         );
       default:
         return BoxDecoration(
@@ -1172,11 +1439,33 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
 
   TableRow _buildTableRow(T item, Map<String, dynamic> headerMap, int index) {
     final cells = <Widget>[];
+    int cellIndex = 0;
+    final totalCells = (widget.showCheckboxColumn ? 1 : 0) + headerMap.length + 1; // +1 for actions
+
+    // Helper function to get cell decoration for bordered table type
+    BoxDecoration? getCellDecoration(int currentIndex) {
+      if (_currentTableType != FlexibleDataTableType.bordered) {
+        return null;
+      }
+
+      return BoxDecoration(
+        border: Border(
+          right: currentIndex < totalCells - 1
+              ? BorderSide(color: _border, width: 1)
+              : BorderSide.none,
+        ),
+      );
+    }
 
     if (widget.showCheckboxColumn) {
       cells.add(
-        SizedBox(
+        Container(
           width: 50,
+          constraints: BoxConstraints(
+            minHeight: _getRowHeight(),
+          ),
+          padding: _getCellPadding(),
+          decoration: getCellDecoration(cellIndex),
           child: Theme(
             data: Theme.of(context).copyWith(
               checkboxTheme: CheckboxThemeData(
@@ -1195,9 +1484,11 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
           ),
         ),
       );
+      cellIndex++;
     }
 
     final map = widget.toTableDataMap(item);
+    // NEW: Only show visible headers
     for (final key in headerMap.keys) {
       final value = map[key];
       cells.add(
@@ -1206,6 +1497,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
             minHeight: _getRowHeight(),
           ),
           padding: _getCellPadding(),
+          decoration: getCellDecoration(cellIndex),
           child: widget.cellBuilders?.containsKey(key) ?? false
               ? widget.cellBuilders![key]!(value, item)
               : Text(
@@ -1217,6 +1509,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
           ),
         ),
       );
+      cellIndex++;
     }
 
     cells.add(
@@ -1225,11 +1518,11 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
           minHeight: _getRowHeight(),
         ),
         padding: _getCellPadding(),
+        decoration: getCellDecoration(cellIndex), // Last cell, no right border
         child: widget.actionBuilder(item),
       ),
     );
 
-    // NEW: Wrap TableRow with InkWell for row click functionality
     final tableRow = TableRow(
       decoration: BoxDecoration(
         color: _getRowColor(index),
@@ -1277,11 +1570,29 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
 
   List<Widget> _buildHeaderCells(Map<String, dynamic> headerMap) {
     final cells = <Widget>[];
+    int cellIndex = 0;
+    final totalCells = (widget.showCheckboxColumn ? 1 : 0) + headerMap.length + 1; // +1 for actions
+
+    // Helper function to get header cell decoration for bordered table type
+    BoxDecoration? getHeaderCellDecoration(int currentIndex) {
+      if (_currentTableType != FlexibleDataTableType.bordered) {
+        return null;
+      }
+
+      return BoxDecoration(
+        border: Border(
+          right: currentIndex < totalCells - 1
+              ? BorderSide(color: _border, width: 1)
+              : BorderSide.none,
+        ),
+      );
+    }
 
     if (widget.showCheckboxColumn) {
       cells.add(Container(
         height: widget.headerHeight,
         alignment: Alignment.center,
+        decoration: getHeaderCellDecoration(cellIndex),
         child: Theme(
           data: Theme.of(context).copyWith(
             checkboxTheme: CheckboxThemeData(
@@ -1309,13 +1620,16 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
           ),
         ),
       ));
+      cellIndex++;
     }
 
+    // NEW: Use display names from availableHeaders
     for (final key in headerMap.keys) {
       if (widget.customHeaderBuilders?.containsKey(key) ?? false) {
         cells.add(Container(
           height: widget.headerHeight,
           padding: EdgeInsets.symmetric(horizontal: _currentTableType == FlexibleDataTableType.compact ? 8 : 16),
+          decoration: getHeaderCellDecoration(cellIndex),
           child: widget.customHeaderBuilders![key]!(key),
         ));
       } else {
@@ -1326,13 +1640,17 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
             ? _headerText.withValues(alpha: 0.8)  // Subtle text for minimal
             : _headerText);
 
+        // NEW: Use display name from availableHeaders
+        final displayName = _availableHeadersMap[key] ?? key;
+
         cells.add(Container(
           height: widget.headerHeight,
           padding: EdgeInsets.symmetric(horizontal: _currentTableType == FlexibleDataTableType.compact ? 8 : 16),
+          decoration: getHeaderCellDecoration(cellIndex),
           child: Row(
             children: [
               Text(
-                key,
+                displayName,
                 style: GoogleFonts.poppins(
                     color: headerTextColor,
                     fontWeight: _currentTableType == FlexibleDataTableType.modern
@@ -1364,6 +1682,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
           ),
         ));
       }
+      cellIndex++;
     }
 
     // Action column header
@@ -1376,6 +1695,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     cells.add(Container(
       height: widget.headerHeight,
       padding: EdgeInsets.symmetric(horizontal: _currentTableType == FlexibleDataTableType.compact ? 8 : 14),
+      decoration: getHeaderCellDecoration(cellIndex), // Last cell, no right border
       child: Center(
         child: Text(
           widget.actionColumnName ?? 'Actions',
@@ -1457,9 +1777,114 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
           const SizedBox(width: 16),
           _buildTableTypeSelector(),
         ],
+        // NEW: Add header selector
+        if (widget.showHeaderSelector) ...[
+          const SizedBox(width: 16),
+          _buildHeaderSelector(),
+        ],
         const Spacer(),
         _buildSearchField(),
       ],
+    );
+  }
+
+  // NEW: Header selector widget
+  Widget _buildHeaderSelector() {
+    return Tooltip(
+      message: widget.headerSelectorTooltip ?? 'Customize columns',
+      child: Container(
+        height: 40,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          color: _surfaceColor,
+          border: Border.all(color: _border),
+        ),
+        child: InkWell(
+          onTap: _showHeaderSelectionDialog,
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 4,
+                  height: 40,
+                  color: widget.primaryColor,
+                ),
+                const SizedBox(width: 8),
+                Icon(
+                  Icons.view_column,
+                  color: widget.primaryColor,
+                  size: 16,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'Columns',
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: _rowText,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: widget.primaryColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '${_visibleHeaders.length}',
+                    style: GoogleFonts.poppins(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: widget.primaryColor,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // FIXED: Show header selection dialog with proper checkbox functionality
+  void _showHeaderSelectionDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return _HeaderSelectionDialog(
+          availableHeaders: _availableHeadersMap,
+          initialVisibleHeaders: _visibleHeaders,
+          primaryColor: widget.primaryColor,
+          isDarkMode: _isDarkMode,
+          dialogBackgroundColor: _dialogBackgroundColor,
+          dialogBorderColor: _dialogBorderColor,
+          rowTextColor: _rowText,
+          subtleTextColor: _subtleTextColor,
+          disabledColor: _disabledColor,
+          onApply: (newVisibleHeaders) async {
+            await _handleHeaderVisibilityChange(newVisibleHeaders);
+
+            // Show success message
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Table columns updated (${newVisibleHeaders.length} visible)'),
+                  backgroundColor: widget.primaryColor,
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              );
+            }
+          },
+        );
+      },
     );
   }
 
@@ -1672,6 +2097,16 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
   }
 
   Widget _buildSearchField() {
+    // Build search hint text
+    String searchHintText = widget.searchHint ?? 'Search';
+
+    // Add info about additional searchable fields if they exist
+    if (widget.additionalSearchableFields != null && widget.additionalSearchableFields!.isNotEmpty) {
+      if (widget.searchHint == null) {
+        searchHintText = 'Search all fields...';
+      }
+    }
+
     return SizedBox(
       width: 250,
       height: 40,
@@ -1683,7 +2118,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
           fontSize: 14,
         ),
         decoration: InputDecoration(
-          hintText: 'Search',
+          hintText: searchHintText,
           hintStyle: GoogleFonts.poppins(
             color: _subtleTextColor,
             fontSize: 14,
@@ -1692,6 +2127,16 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
             Icons.search,
             color: _subtleTextColor,
           ),
+          suffixIcon: widget.additionalSearchableFields != null && widget.additionalSearchableFields!.isNotEmpty
+              ? Tooltip(
+            message: 'Searches in: ${_getSearchableFieldsTooltip()}',
+            child: Icon(
+              Icons.info_outline,
+              color: _subtleTextColor,
+              size: 16,
+            ),
+          )
+              : null,
           filled: true,
           fillColor: _surfaceColor,
           border: OutlineInputBorder(
@@ -1709,6 +2154,32 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
         ),
       ),
     );
+  }
+
+  // NEW: Generate tooltip text for searchable fields
+  String _getSearchableFieldsTooltip() {
+    List<String> searchableFields = [];
+
+    // Add visible columns
+    if (_preferencesLoaded) {
+      searchableFields.addAll(_visibleHeaders.map((key) => _availableHeadersMap[key] ?? key));
+    }
+
+    // Add additional searchable fields
+    if (widget.additionalSearchableFields != null) {
+      for (String field in widget.additionalSearchableFields!) {
+        final displayName = _availableHeadersMap[field] ?? field;
+        if (!searchableFields.contains(displayName)) {
+          searchableFields.add('$displayName (hidden)');
+        }
+      }
+    }
+
+    if (searchableFields.length > 6) {
+      return '${searchableFields.take(6).join(', ')} and ${searchableFields.length - 6} more...';
+    }
+
+    return searchableFields.join(', ');
   }
 
   Widget _buildPageSizeDropdown() {
@@ -1858,11 +2329,13 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       final sheet = workbook.sheets[workbook.getDefaultSheet() ?? 'Sheet1'];
       if (sheet == null) throw Exception('Failed to create sheet');
 
-      for (var i = 0; i < widget.toTableDataMap(_filteredData.first).length + 1; i++) {
+      // NEW: Use visible headers for export
+      final headerMap = _getVisibleHeaderMap();
+
+      for (var i = 0; i < headerMap.length + 1; i++) {
         sheet.setColumnWidth(i, 20.0);
       }
 
-      final headerMap = _getHeaderMap();
       var columnIndex = 0;
 
       sheet.merge(excel.CellIndex.indexByColumnRow(columnIndex: columnIndex, rowIndex: 0),
@@ -1882,6 +2355,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       );
       columnIndex++;
 
+      // NEW: Use display names for headers in export
       for (final key in headerMap.keys) {
         sheet.merge(excel.CellIndex.indexByColumnRow(columnIndex: columnIndex, rowIndex: 0),
             excel.CellIndex.indexByColumnRow(columnIndex: columnIndex, rowIndex: 0));
@@ -1891,7 +2365,8 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
           rowIndex: 0,
         ));
 
-        cell.value = excel.TextCellValue(key);
+        final displayName = _availableHeadersMap[key] ?? key;
+        cell.value = excel.TextCellValue(displayName);
         cell.cellStyle = excel.CellStyle(
           bold: true,
           backgroundColorHex: excel.ExcelColor.fromHexString('#6D28D9'),
@@ -1976,14 +2451,15 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
   Future<void> _exportToPdf() async {
     await _showProgressDialogWithTimeout('Generating PDF file...', () async {
       final pdf = pw.Document();
-      final headerMap = _getHeaderMap();
+      // NEW: Use visible headers for export
+      final headerMap = _getVisibleHeaderMap();
 
       pdf.addPage(
         pw.MultiPage(
           pageFormat: PdfPageFormat.a4.landscape,
           build: (context) => [
             pw.TableHelper.fromTextArray(
-              headers: ['S.No', ...headerMap.keys],
+              headers: ['S.No', ...headerMap.keys.map((key) => _availableHeadersMap[key] ?? key)],
               data: _filteredData.asMap().entries.map((entry) {
                 final map = widget.toTableDataMap(entry.value);
                 return [
@@ -2497,7 +2973,380 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     _searchController.dispose();
     _horizontalScrollController.dispose();
     _verticalScrollController.dispose();
+    _headerScrollController.dispose();
     super.dispose();
+  }
+
+  // NEW: Public methods for external control of preferences
+
+  /// Reset headers to default visibility
+  Future<void> resetToDefaults() async {
+    _setDefaultHeaders();
+    await _saveHeaderPreferences();
+    setState(() {});
+    widget.onHeaderVisibilityChanged?.call(_visibleHeaders.toList());
+  }
+
+  /// Show all available columns
+  Future<void> showAllColumns() async {
+    _visibleHeaders = Set<String>.from(_availableHeadersMap.keys);
+    await _saveHeaderPreferences();
+    setState(() {});
+    widget.onHeaderVisibilityChanged?.call(_visibleHeaders.toList());
+  }
+
+  /// Get current visible header count
+  int get visibleHeaderCount => _visibleHeaders.length;
+
+  /// Get total available header count
+  int get totalHeaderCount => _availableHeadersMap.length;
+
+  /// Check if preferences are loaded
+  bool get preferencesLoaded => _preferencesLoaded;
+
+  /// Get current visible headers list
+  List<String> get currentVisibleHeaders => _visibleHeaders.toList();
+
+  /// Manually set visible headers (with persistence)
+  Future<void> setVisibleHeaders(List<String> headers) async {
+    final validHeaders = headers.where((h) => _availableHeadersMap.containsKey(h)).toSet();
+    if (validHeaders.isNotEmpty) {
+      await _handleHeaderVisibilityChange(validHeaders);
+    }
+  }
+
+  /// Clear all preferences for this table
+  Future<void> clearPreferences() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_tableId!);
+
+      // Reset to defaults
+      _setDefaultHeaders();
+      setState(() {});
+
+      debugPrint('🗑️ Cleared preferences for $_tableId');
+    } catch (e) {
+      debugPrint('⚠ Error clearing preferences: $e');
+    }
+  }
+
+  // NEW: Get list of all searchable fields (visible + additional)
+  List<String> get searchableFields {
+    List<String> fields = [];
+
+    // Add visible headers
+    if (_preferencesLoaded) {
+      fields.addAll(_visibleHeaders.toList());
+    }
+
+    // Add additional searchable fields
+    if (widget.additionalSearchableFields != null) {
+      for (String field in widget.additionalSearchableFields!) {
+        if (!fields.contains(field)) {
+          fields.add(field);
+        }
+      }
+    }
+
+    return fields;
+  }
+
+  // NEW: Get display names of searchable fields
+  List<String> get searchableFieldDisplayNames {
+    return searchableFields.map((field) => _availableHeadersMap[field] ?? field).toList();
+  }
+}
+
+// NEW: Separate StatefulWidget for Header Selection Dialog
+class _HeaderSelectionDialog extends StatefulWidget {
+  final Map<String, String> availableHeaders;
+  final Set<String> initialVisibleHeaders;
+  final Color primaryColor;
+  final bool isDarkMode;
+  final Color dialogBackgroundColor;
+  final Color dialogBorderColor;
+  final Color rowTextColor;
+  final Color subtleTextColor;
+  final Color disabledColor;
+  final Function(Set<String>) onApply;
+
+  const _HeaderSelectionDialog({
+    required this.availableHeaders,
+    required this.initialVisibleHeaders,
+    required this.primaryColor,
+    required this.isDarkMode,
+    required this.dialogBackgroundColor,
+    required this.dialogBorderColor,
+    required this.rowTextColor,
+    required this.subtleTextColor,
+    required this.disabledColor,
+    required this.onApply,
+  });
+
+  @override
+  State<_HeaderSelectionDialog> createState() => _HeaderSelectionDialogState();
+}
+
+class _HeaderSelectionDialogState extends State<_HeaderSelectionDialog> {
+  late Set<String> _tempVisibleHeaders;
+
+  @override
+  void initState() {
+    super.initState();
+    _tempVisibleHeaders = Set<String>.from(widget.initialVisibleHeaders);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      backgroundColor: widget.dialogBackgroundColor,
+      child: Container(
+        width: 400,
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: widget.dialogBorderColor),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: widget.primaryColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    Icons.view_column,
+                    color: widget.primaryColor,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Customize Columns',
+                    style: GoogleFonts.poppins(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                      color: widget.rowTextColor,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: Icon(
+                    Icons.close,
+                    color: widget.subtleTextColor,
+                  ),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: 24,
+                    minHeight: 24,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+
+            // Description
+            Text(
+              'Select which columns to display in the table',
+              style: GoogleFonts.poppins(
+                fontSize: 14,
+                color: widget.subtleTextColor,
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // Select All / Deselect All buttons
+            Row(
+              children: [
+                TextButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _tempVisibleHeaders = Set<String>.from(widget.availableHeaders.keys);
+                    });
+                  },
+                  icon: Icon(
+                    Icons.select_all,
+                    size: 16,
+                    color: widget.primaryColor,
+                  ),
+                  label: Text(
+                    'Select All',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      color: widget.primaryColor,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                TextButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _tempVisibleHeaders.clear();
+                    });
+                  },
+                  icon: Icon(
+                    Icons.clear_all,
+                    size: 16,
+                    color: widget.subtleTextColor,
+                  ),
+                  label: Text(
+                    'Deselect All',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      color: widget.subtleTextColor,
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                // Column count
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: widget.primaryColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '${_tempVisibleHeaders.length}/${widget.availableHeaders.length}',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: widget.primaryColor,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // Headers list
+            Container(
+              constraints: const BoxConstraints(maxHeight: 300),
+              child: SingleChildScrollView(
+                child: Column(
+                  children: widget.availableHeaders.entries.map((entry) {
+                    final key = entry.key;
+                    final displayName = entry.value;
+                    final isVisible = _tempVisibleHeaders.contains(key);
+
+                    return Container(
+                      margin: const EdgeInsets.symmetric(vertical: 2),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: isVisible
+                              ? widget.primaryColor.withValues(alpha: 0.3)
+                              : widget.dialogBorderColor.withValues(alpha: 0.2),
+                        ),
+                        color: isVisible
+                            ? widget.primaryColor.withValues(alpha: 0.05)
+                            : Colors.transparent,
+                      ),
+                      child: Theme(
+                        data: Theme.of(context).copyWith(
+                          checkboxTheme: CheckboxThemeData(
+                            fillColor: WidgetStateProperty.resolveWith((states) {
+                              if (states.contains(WidgetState.selected)) {
+                                return widget.primaryColor;
+                              }
+                              return widget.isDarkMode ? Colors.grey[700] : Colors.grey[300];
+                            }),
+                            checkColor: WidgetStateProperty.all(Colors.white),
+                          ),
+                        ),
+                        child: CheckboxListTile(
+                          title: Text(
+                            displayName,
+                            style: GoogleFonts.poppins(
+                              fontSize: 14,
+                              fontWeight: isVisible ? FontWeight.w500 : FontWeight.w400,
+                              color: isVisible ? widget.primaryColor : widget.rowTextColor,
+                            ),
+                          ),
+                          subtitle: key != displayName ? Text(
+                            key,
+                            style: GoogleFonts.poppins(
+                              fontSize: 12,
+                              color: widget.subtleTextColor,
+                            ),
+                          ) : null,
+                          value: isVisible,
+                          onChanged: (bool? value) {
+                            setState(() {
+                              if (value == true) {
+                                _tempVisibleHeaders.add(key);
+                              } else {
+                                _tempVisibleHeaders.remove(key);
+                              }
+                            });
+                          },
+                          activeColor: widget.primaryColor,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                          dense: true,
+                          controlAffinity: ListTileControlAffinity.leading,
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 24),
+
+            // Footer buttons
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: Text(
+                    'Cancel',
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.w500,
+                      color: widget.subtleTextColor,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                ElevatedButton(
+                  onPressed: _tempVisibleHeaders.isEmpty ? null : () {
+                    widget.onApply(_tempVisibleHeaders);
+                    Navigator.of(context).pop();
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: widget.primaryColor,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    disabledBackgroundColor: widget.disabledColor,
+                  ),
+                  child: Text(
+                    'Apply',
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
