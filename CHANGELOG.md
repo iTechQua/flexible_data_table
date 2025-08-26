@@ -1,3 +1,10 @@
+## [1.1.3] - 2025-08-26
+
+### Updated
+- This version fix Multiple widgets used the same GlobalKey issue
+- Added search field hidable
+- Added list widget in available row
+
 ## [1.1.2] - 2025-08-26
 
 ### Updated

@@ -84,6 +84,13 @@ class FlexibleDataTable<T> extends StatefulWidget {
   final List<String>? additionalSearchableFields; // Fields to include in search but not display
   final String? searchHint; // Custom search hint text
 
+  // NEW: Search field visibility control
+  final bool showSearchField; // Control search field visibility
+  final bool allowSearchToggle; // Allow users to toggle search field
+
+  // NEW: Additional top bar widgets
+  final List<Widget>? additionalTopBarWidgets; // Custom widgets to add to top bar
+
   const FlexibleDataTable({
     super.key,
     required this.data,
@@ -144,6 +151,13 @@ class FlexibleDataTable<T> extends StatefulWidget {
     // NEW: Additional searchable fields parameters
     this.additionalSearchableFields,
     this.searchHint,
+
+    // NEW: Search field visibility parameters
+    this.showSearchField = true,
+    this.allowSearchToggle = true,
+
+    // NEW: Additional top bar widgets parameter
+    this.additionalTopBarWidgets,
   });
 
   @override
@@ -166,6 +180,9 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
   Map<String, String> _availableHeadersMap = <String, String>{};
   bool _preferencesLoaded = false;
   String? _tableId; // Unique identifier for this table's preferences
+
+  // NEW: Search field visibility state
+  bool _isSearchFieldVisible = true;
 
   final ScrollController _horizontalScrollController = ScrollController();
   final ScrollController _verticalScrollController = ScrollController();
@@ -264,6 +281,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     _filteredData = List.from(widget.data);
     _pageSize = widget.pageSize;
     _currentTableType = widget.tableType;
+    _isSearchFieldVisible = widget.showSearchField; // Initialize search field visibility
     _setupScrollControllers();
     _updateEffectiveTotalItems();
     _updateDefaultHeaderMap();
@@ -1782,8 +1800,28 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
           const SizedBox(width: 16),
           _buildHeaderSelector(),
         ],
+        // NEW: Add search toggle button if allowed
+        if (widget.allowSearchToggle) ...[
+          const SizedBox(width: 16),
+          _buildSearchToggleButton(),
+        ],
+        // NEW: Add additional custom widgets
+        if (widget.additionalTopBarWidgets != null && widget.additionalTopBarWidgets!.isNotEmpty) ...[
+          const SizedBox(width: 16),
+          ...widget.additionalTopBarWidgets!.expand((widget) => [
+            widget,
+            const SizedBox(width: 12), // Spacing between additional widgets
+          ]).toList()
+            ..removeLast(), // Remove the last spacing
+        ],
         const Spacer(),
-        _buildSearchField(),
+        // NEW: Conditionally show search field
+        if (_isSearchFieldVisible) _buildSearchField(),
+        // NEW: Show search icon when field is hidden
+        if (!_isSearchFieldVisible && widget.allowSearchToggle) ...[
+          const SizedBox(width: 16),
+          _buildCompactSearchButton(),
+        ],
       ],
     );
   }
@@ -1845,6 +1883,95 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                 ),
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // NEW: Search toggle button widget
+  Widget _buildSearchToggleButton() {
+    return Tooltip(
+      message: _isSearchFieldVisible ? 'Hide search field' : 'Show search field',
+      child: Container(
+        height: 40,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          color: _isSearchFieldVisible
+              ? widget.primaryColor.withValues(alpha: 0.1)
+              : _surfaceColor,
+          border: Border.all(
+            color: _isSearchFieldVisible
+                ? widget.primaryColor.withValues(alpha: 0.3)
+                : _border,
+          ),
+        ),
+        child: InkWell(
+          onTap: () {
+            setState(() {
+              _isSearchFieldVisible = !_isSearchFieldVisible;
+              // Clear search when hiding the field
+              if (!_isSearchFieldVisible && _searchQuery.isNotEmpty) {
+                _searchController.clear();
+                _filterData('');
+              }
+            });
+          },
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  _isSearchFieldVisible ? Icons.search_off : Icons.search,
+                  color: _isSearchFieldVisible
+                      ? widget.primaryColor
+                      : _subtleTextColor,
+                  size: 16,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  _isSearchFieldVisible ? 'Hide' : 'Search',
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: _isSearchFieldVisible
+                        ? widget.primaryColor
+                        : _rowText,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // NEW: Compact search button when field is hidden
+  Widget _buildCompactSearchButton() {
+    return Tooltip(
+      message: 'Show search field',
+      child: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          color: _surfaceColor,
+          border: Border.all(color: _border),
+        ),
+        child: InkWell(
+          onTap: () {
+            setState(() {
+              _isSearchFieldVisible = true;
+            });
+          },
+          borderRadius: BorderRadius.circular(8),
+          child: Icon(
+            Icons.search,
+            color: _subtleTextColor,
+            size: 18,
           ),
         ),
       ),
@@ -2594,8 +2721,6 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     if (_isDialogShowing) return;
     _isDialogShowing = true;
 
-    final GlobalKey<State> dialogKey = GlobalKey<State>();
-
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -2603,7 +2728,6 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
         return PopScope(
           canPop: false,
           child: Dialog(
-            key: dialogKey,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16.0),
             ),
