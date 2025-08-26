@@ -1,3 +1,8 @@
+## [1.1.2] - 2025-08-26
+
+### Updated
+- This version fix late initialization issue
+
 ## [1.1.1] - 2025-08-14
 
 ### Updated

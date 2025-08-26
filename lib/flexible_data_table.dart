@@ -151,19 +151,19 @@ class FlexibleDataTable<T> extends StatefulWidget {
 }
 
 class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
-  late List<T> _filteredData;
-  late TextEditingController _searchController;
+  List<T> _filteredData = [];
+  TextEditingController _searchController = TextEditingController();
   String? _sortColumn;
   bool _sortAscending = true;
   int _currentPage = 0;
   int _pageSize = 10;
   String _searchQuery = '';
-  late int _effectiveTotalItems;
-  late FlexibleDataTableType _currentTableType;
+  int _effectiveTotalItems = 0;
+  FlexibleDataTableType _currentTableType = FlexibleDataTableType.standard;
 
   // NEW: Header customization state with persistence
-  late Set<String> _visibleHeaders;
-  late Map<String, String> _availableHeadersMap;
+  Set<String> _visibleHeaders = <String>{};
+  Map<String, String> _availableHeadersMap = <String, String>{};
   bool _preferencesLoaded = false;
   String? _tableId; // Unique identifier for this table's preferences
 
@@ -3025,9 +3025,9 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       _setDefaultHeaders();
       setState(() {});
 
-      debugPrint('🗑️ Cleared preferences for $_tableId');
+      debugPrint('Cleared preferences for $_tableId');
     } catch (e) {
-      debugPrint('⚠ Error clearing preferences: $e');
+      debugPrint('Error clearing preferences: $e');
     }
   }
 
@@ -3089,7 +3089,7 @@ class _HeaderSelectionDialog extends StatefulWidget {
 }
 
 class _HeaderSelectionDialogState extends State<_HeaderSelectionDialog> {
-  late Set<String> _tempVisibleHeaders;
+  Set<String> _tempVisibleHeaders = <String>{};
 
   @override
   void initState() {
