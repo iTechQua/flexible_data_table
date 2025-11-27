@@ -1,3 +1,9 @@
+## [1.1.4] - 2025-11-27
+
+### Updated
+- This version fix all length selection issue
+- Also fix filter issue when select all length then apply filter
+
 ## [1.1.3] - 2025-08-26
 
 ### Updated
