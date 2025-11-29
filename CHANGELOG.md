@@ -1,3 +1,8 @@
+## [1.1.5] - 2025-11-29
+
+### Updated
+- This version fix export issue
+
 ## [1.1.4] - 2025-11-27
 
 ### Updated

@@ -2544,30 +2544,55 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
   }
 
   Future<void> _exportToExcel() async {
-    await _showProgressDialogWithTimeout('Generating Excel file...', () async {
-      final workbook = excel.Excel.createExcel();
-      final sheet = workbook.sheets[workbook.getDefaultSheet() ?? 'Sheet1'];
-      if (sheet == null) throw Exception('Failed to create sheet');
+  await _showProgressDialogWithTimeout('Generating Excel file...', () async {
+    final workbook = excel.Excel.createExcel();
+    final sheet = workbook.sheets[workbook.getDefaultSheet() ?? 'Sheet1'];
+    if (sheet == null) throw Exception('Failed to create sheet');
 
-      final headerMap = _getVisibleHeaderMap();
+    final headerMap = _getVisibleHeaderMap();
 
-      for (var i = 0; i < headerMap.length + 1; i++) {
-        sheet.setColumnWidth(i, 20.0);
-      }
+    // Set column widths
+    for (var i = 0; i < headerMap.length + 1; i++) {
+      sheet.setColumnWidth(i, 20.0);
+    }
 
-      var columnIndex = 0;
+    var columnIndex = 0;
 
-      sheet.merge(excel.CellIndex.indexByColumnRow(
-          columnIndex: columnIndex, rowIndex: 0),
-          excel.CellIndex.indexByColumnRow(
-              columnIndex: columnIndex, rowIndex: 0));
+    // S.No header
+    sheet.merge(
+      excel.CellIndex.indexByColumnRow(columnIndex: columnIndex, rowIndex: 0),
+      excel.CellIndex.indexByColumnRow(columnIndex: columnIndex, rowIndex: 0)
+    );
 
-      final sNoCell = sheet.cell(excel.CellIndex.indexByColumnRow(
+    final sNoCell = sheet.cell(excel.CellIndex.indexByColumnRow(
+      columnIndex: columnIndex,
+      rowIndex: 0,
+    ));
+    sNoCell.value = excel.TextCellValue('S.No');
+    sNoCell.cellStyle = excel.CellStyle(
+      bold: true,
+      backgroundColorHex: excel.ExcelColor.fromHexString('#6D28D9'),
+      fontColorHex: excel.ExcelColor.fromHexString('#FFFFFF'),
+      horizontalAlign: excel.HorizontalAlign.Center,
+      verticalAlign: excel.VerticalAlign.Center,
+    );
+    columnIndex++;
+
+    // Create headers
+    for (final key in headerMap.keys) {
+      sheet.merge(
+        excel.CellIndex.indexByColumnRow(columnIndex: columnIndex, rowIndex: 0),
+        excel.CellIndex.indexByColumnRow(columnIndex: columnIndex, rowIndex: 0)
+      );
+
+      final cell = sheet.cell(excel.CellIndex.indexByColumnRow(
         columnIndex: columnIndex,
         rowIndex: 0,
       ));
-      sNoCell.value = excel.TextCellValue('S.No');
-      sNoCell.cellStyle = excel.CellStyle(
+
+      final displayName = _availableHeadersMap[key] ?? key;
+      cell.value = excel.TextCellValue(displayName);
+      cell.cellStyle = excel.CellStyle(
         bold: true,
         backgroundColorHex: excel.ExcelColor.fromHexString('#6D28D9'),
         fontColorHex: excel.ExcelColor.fromHexString('#FFFFFF'),
@@ -2575,79 +2600,100 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
         verticalAlign: excel.VerticalAlign.Center,
       );
       columnIndex++;
+    }
 
+    // Add data rows
+    for (var i = 0; i < _filteredData.length; i++) {
+      columnIndex = 0;
+      final rowColor = i % 2 == 0 ? '#F3F4F6' : '#FFFFFF';
+
+      // S.No
+      final sNoDataCell = sheet.cell(excel.CellIndex.indexByColumnRow(
+        columnIndex: columnIndex,
+        rowIndex: i + 1,
+      ));
+      sNoDataCell.value = excel.TextCellValue((i + 1).toString());
+      sNoDataCell.cellStyle = excel.CellStyle(
+        backgroundColorHex: excel.ExcelColor.fromHexString(rowColor),
+        horizontalAlign: excel.HorizontalAlign.Center,
+      );
+      columnIndex++;
+
+      final rowData = widget.toTableDataMap(_filteredData[i]);
       for (final key in headerMap.keys) {
-        sheet.merge(excel.CellIndex.indexByColumnRow(
-            columnIndex: columnIndex, rowIndex: 0),
-            excel.CellIndex.indexByColumnRow(
-                columnIndex: columnIndex, rowIndex: 0));
-
+        final value = rowData[key];
         final cell = sheet.cell(excel.CellIndex.indexByColumnRow(
-          columnIndex: columnIndex,
-          rowIndex: 0,
-        ));
-
-        final displayName = _availableHeadersMap[key] ?? key;
-        cell.value = excel.TextCellValue(displayName);
-        cell.cellStyle = excel.CellStyle(
-          bold: true,
-          backgroundColorHex: excel.ExcelColor.fromHexString('#6D28D9'),
-          fontColorHex: excel.ExcelColor.fromHexString('#FFFFFF'),
-          horizontalAlign: excel.HorizontalAlign.Center,
-          verticalAlign: excel.VerticalAlign.Center,
-        );
-        columnIndex++;
-      }
-
-      for (var i = 0; i < _filteredData.length; i++) {
-        columnIndex = 0;
-        final rowColor = i % 2 == 0 ? '#F3F4F6' : '#FFFFFF';
-
-        final sNoDataCell = sheet.cell(excel.CellIndex.indexByColumnRow(
           columnIndex: columnIndex,
           rowIndex: i + 1,
         ));
-        sNoDataCell.value = excel.TextCellValue((i + 1).toString());
-        sNoDataCell.cellStyle = excel.CellStyle(
+
+        // Convert value to string safely
+        String cellValue = _extractCellValue(value);
+        
+        // Always use TextCellValue to avoid parsing issues
+        cell.value = excel.TextCellValue(cellValue);
+        cell.cellStyle = excel.CellStyle(
           backgroundColorHex: excel.ExcelColor.fromHexString(rowColor),
-          horizontalAlign: excel.HorizontalAlign.Center,
+          horizontalAlign: excel.HorizontalAlign.Left,
         );
+        
         columnIndex++;
-
-        final rowData = widget.toTableDataMap(_filteredData[i]);
-        for (final key in headerMap.keys) {
-          final value = rowData[key];
-          final cellValue = value?.toString() ?? '';
-          final cell = sheet.cell(excel.CellIndex.indexByColumnRow(
-            columnIndex: columnIndex,
-            rowIndex: i + 1,
-          ));
-
-          if (cellValue.isNotEmpty && num.tryParse(cellValue) != null) {
-            cell.value = excel.IntCellValue(int.parse(cellValue));
-            cell.cellStyle = excel.CellStyle(
-              backgroundColorHex: excel.ExcelColor.fromHexString(rowColor),
-              horizontalAlign: excel.HorizontalAlign.Right,
-            );
-          } else {
-            cell.value = excel.TextCellValue(cellValue);
-            cell.cellStyle = excel.CellStyle(
-              backgroundColorHex: excel.ExcelColor.fromHexString(rowColor),
-              horizontalAlign: excel.HorizontalAlign.Left,
-            );
-          }
-          columnIndex++;
-        }
       }
+    }
 
-      sheet.setDefaultColumnWidth(15.0);
+    sheet.setDefaultColumnWidth(15.0);
 
-      final excelData = workbook.encode();
-      if (excelData == null) throw Exception('Failed to save Excel file');
+    final excelData = workbook.encode();
+    if (excelData == null) throw Exception('Failed to save Excel file');
 
-      await _saveFile(excelData, '${widget.fileName}.xlsx');
-    });
+    await _saveFile(excelData, '${widget.fileName}.xlsx');
+  });
+}
+
+// Add this helper method in your FlexibleDataTableState class
+String _extractCellValue(dynamic value) {
+  if (value == null) return '';
+  
+  // Handle Map (like your vehicle number object)
+  if (value is Map) {
+    if (value.containsKey('number')) {
+      return value['number']?.toString() ?? '';
+    }
+    if (value.containsKey('name')) {
+      return value['name']?.toString() ?? '';
+    }
+    // Return first non-null value from map
+    for (var val in value.values) {
+      if (val != null && val.toString().isNotEmpty) {
+        return val.toString();
+      }
+    }
+    return '';
   }
+  
+  // Handle List
+  if (value is List) {
+    return value.map((e) => e?.toString() ?? '').join(', ');
+  }
+  
+  // Handle DateTime
+  if (value is DateTime) {
+    return value.toIso8601String();
+  }
+  
+  // Handle bool
+  if (value is bool) {
+    return value ? 'Yes' : 'No';
+  }
+  
+  // Handle numbers with decimal points
+  if (value is double) {
+    return value.toStringAsFixed(2);
+  }
+  
+  // Handle everything else as string
+  return value.toString();
+}
 
   Map<String, dynamic> _getHeaderMap() {
     if (widget.headers != null && widget.headers!.isNotEmpty) {
@@ -2673,52 +2719,47 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
   }
 
   Future<void> _exportToPdf() async {
-    await _showProgressDialogWithTimeout('Generating PDF file...', () async {
-      final pdf = pw.Document();
-      final headerMap = _getVisibleHeaderMap();
+  await _showProgressDialogWithTimeout('Generating PDF file...', () async {
+    final pdf = pw.Document();
+    final headerMap = _getVisibleHeaderMap();
 
-      pdf.addPage(
-        pw.MultiPage(
-          pageFormat: PdfPageFormat.a4.landscape,
-          build: (context) =>
-          [
-            pw.TableHelper.fromTextArray(
-              headers: [
-                'S.No',
-                ...headerMap.keys.map((key) => _availableHeadersMap[key] ?? key)
-              ],
-              data: _filteredData
-                  .asMap()
-                  .entries
-                  .map((entry) {
-                final map = widget.toTableDataMap(entry.value);
-                return [
-                  (entry.key + 1).toString(),
-                  ...headerMap.keys.map((key) => map[key]?.toString() ?? '')
-                ];
-              }).toList(),
-              headerStyle: pw.TextStyle(
-                fontWeight: pw.FontWeight.bold,
-                color: PdfColors.white,
-              ),
-              headerDecoration: pw.BoxDecoration(
-                color: PdfColor.fromHex('6D28D9'),
-              ),
-              headerHeight: 25,
-              cellHeight: 20,
-              cellAlignments: {
-                0: pw.Alignment.center,
-              },
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4.landscape,
+        build: (context) => [
+          pw.TableHelper.fromTextArray(
+            headers: [
+              'S.No',
+              ...headerMap.keys.map((key) => _availableHeadersMap[key] ?? key)
+            ],
+            data: _filteredData.asMap().entries.map((entry) {
+              final map = widget.toTableDataMap(entry.value);
+              return [
+                (entry.key + 1).toString(),
+                ...headerMap.keys.map((key) => _extractCellValue(map[key]))
+              ];
+            }).toList(),
+            headerStyle: pw.TextStyle(
+              fontWeight: pw.FontWeight.bold,
+              color: PdfColors.white,
             ),
-          ],
-        ),
-      );
+            headerDecoration: pw.BoxDecoration(
+              color: PdfColor.fromHex('6D28D9'),
+            ),
+            headerHeight: 25,
+            cellHeight: 20,
+            cellAlignments: {
+              0: pw.Alignment.center,
+            },
+          ),
+        ],
+      ),
+    );
 
-      final bytes = await pdf.save();
-
-      await _saveFile(bytes, '${widget.fileName}.pdf');
-    });
-  }
+    final bytes = await pdf.save();
+    await _saveFile(bytes, '${widget.fileName}.pdf');
+  });
+}
 
   Future<void> _showProgressDialogWithTimeout(String message,
       Future<void> Function() operation) async {
