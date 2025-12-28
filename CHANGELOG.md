@@ -1,3 +1,8 @@
+## [1.1.6] - 2025-12-28
+
+### Updated
+- This version added export file custom name (export title property)
+
 ## [1.1.5] - 2025-11-29
 
 ### Updated

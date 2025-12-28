@@ -26,6 +26,7 @@ enum FlexibleDataTableType {
 class FlexibleDataTable<T> extends StatefulWidget {
   final List<T> data;
   final String fileName;
+  final String? exportTitle;
   final Map<String, dynamic> Function(T) toTableDataMap;
   final Map<String, Widget Function(dynamic value, T rowData)>? cellBuilders;
   final Map<String, double>? columnSizes;
@@ -93,6 +94,7 @@ class FlexibleDataTable<T> extends StatefulWidget {
     super.key,
     required this.data,
     required this.fileName,
+    this.exportTitle,
     required this.toTableDataMap,
     required this.actionBuilder,
     this.cellBuilders,
@@ -157,6 +159,18 @@ class FlexibleDataTable<T> extends StatefulWidget {
 }
 
 class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
+  String _formatTitle(String raw) {
+    return raw
+        .replaceAll(RegExp(r'_v\d+_?[a-zA-Z]*'), '') // remove _v1_en
+        .replaceAll(RegExp(r'_'), ' ')              // _ → space
+        .replaceAll(RegExp(r'\s+'), ' ')            // extra spaces
+        .trim()
+        .split(' ')
+        .map((w) =>
+    w.isEmpty ? w : w[0].toUpperCase() + w.substring(1))
+        .join(' ');
+  }
+
   List<T> _filteredData = [];
   TextEditingController _searchController = TextEditingController();
   String? _sortColumn;
@@ -2544,156 +2558,167 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
   }
 
   Future<void> _exportToExcel() async {
-  await _showProgressDialogWithTimeout('Generating Excel file...', () async {
-    final workbook = excel.Excel.createExcel();
-    final sheet = workbook.sheets[workbook.getDefaultSheet() ?? 'Sheet1'];
-    if (sheet == null) throw Exception('Failed to create sheet');
+    await _showProgressDialogWithTimeout('Generating Excel file...', () async {
+      final workbook = excel.Excel.createExcel();
+      final sheet =
+      workbook.sheets[workbook.getDefaultSheet() ?? 'Sheet1'];
+      if (sheet == null) throw Exception('Failed to create sheet');
 
-    final headerMap = _getVisibleHeaderMap();
+      final headerMap = _getVisibleHeaderMap();
+      final totalRecords = _filteredData.length;
 
-    // Set column widths
-    for (var i = 0; i < headerMap.length + 1; i++) {
-      sheet.setColumnWidth(i, 20.0);
-    }
-
-    var columnIndex = 0;
-
-    // S.No header
-    sheet.merge(
-      excel.CellIndex.indexByColumnRow(columnIndex: columnIndex, rowIndex: 0),
-      excel.CellIndex.indexByColumnRow(columnIndex: columnIndex, rowIndex: 0)
-    );
-
-    final sNoCell = sheet.cell(excel.CellIndex.indexByColumnRow(
-      columnIndex: columnIndex,
-      rowIndex: 0,
-    ));
-    sNoCell.value = excel.TextCellValue('S.No');
-    sNoCell.cellStyle = excel.CellStyle(
-      bold: true,
-      backgroundColorHex: excel.ExcelColor.fromHexString('#6D28D9'),
-      fontColorHex: excel.ExcelColor.fromHexString('#FFFFFF'),
-      horizontalAlign: excel.HorizontalAlign.Center,
-      verticalAlign: excel.VerticalAlign.Center,
-    );
-    columnIndex++;
-
-    // Create headers
-    for (final key in headerMap.keys) {
+      // ===== TITLE =====
       sheet.merge(
-        excel.CellIndex.indexByColumnRow(columnIndex: columnIndex, rowIndex: 0),
-        excel.CellIndex.indexByColumnRow(columnIndex: columnIndex, rowIndex: 0)
+        excel.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 0),
+        excel.CellIndex.indexByColumnRow(
+          columnIndex: headerMap.length,
+          rowIndex: 0,
+        ),
       );
 
-      final cell = sheet.cell(excel.CellIndex.indexByColumnRow(
-        columnIndex: columnIndex,
-        rowIndex: 0,
-      ));
+      final titleCell = sheet.cell(
+        excel.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 0),
+      );
+      final title = widget.exportTitle != null
+          ? widget.exportTitle!
+          : _formatTitle(widget.fileName);
 
-      final displayName = _availableHeadersMap[key] ?? key;
-      cell.value = excel.TextCellValue(displayName);
-      cell.cellStyle = excel.CellStyle(
+      titleCell.value = excel.TextCellValue(title);
+
+      titleCell.cellStyle = excel.CellStyle(
         bold: true,
-        backgroundColorHex: excel.ExcelColor.fromHexString('#6D28D9'),
-        fontColorHex: excel.ExcelColor.fromHexString('#FFFFFF'),
-        horizontalAlign: excel.HorizontalAlign.Center,
-        verticalAlign: excel.VerticalAlign.Center,
-      );
-      columnIndex++;
-    }
-
-    // Add data rows
-    for (var i = 0; i < _filteredData.length; i++) {
-      columnIndex = 0;
-      final rowColor = i % 2 == 0 ? '#F3F4F6' : '#FFFFFF';
-
-      // S.No
-      final sNoDataCell = sheet.cell(excel.CellIndex.indexByColumnRow(
-        columnIndex: columnIndex,
-        rowIndex: i + 1,
-      ));
-      sNoDataCell.value = excel.TextCellValue((i + 1).toString());
-      sNoDataCell.cellStyle = excel.CellStyle(
-        backgroundColorHex: excel.ExcelColor.fromHexString(rowColor),
+        fontSize: 16,
         horizontalAlign: excel.HorizontalAlign.Center,
       );
-      columnIndex++;
 
-      final rowData = widget.toTableDataMap(_filteredData[i]);
-      for (final key in headerMap.keys) {
-        final value = rowData[key];
-        final cell = sheet.cell(excel.CellIndex.indexByColumnRow(
+      // ===== TOTAL =====
+      sheet.merge(
+        excel.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 1),
+        excel.CellIndex.indexByColumnRow(
+          columnIndex: headerMap.length,
+          rowIndex: 1,
+        ),
+      );
+
+      final totalCell = sheet.cell(
+        excel.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 1),
+      );
+      totalCell.value =
+          excel.TextCellValue('Total Records: $totalRecords');
+      totalCell.cellStyle = excel.CellStyle(
+        bold: true,
+        fontSize: 12,
+        horizontalAlign: excel.HorizontalAlign.Center,
+      );
+
+      // ===== COLUMN HEADERS (ROW 3) =====
+      int columnIndex = 0;
+      final headerRowIndex = 3;
+
+      final sNoHeader = sheet.cell(
+        excel.CellIndex.indexByColumnRow(
           columnIndex: columnIndex,
-          rowIndex: i + 1,
-        ));
+          rowIndex: headerRowIndex,
+        ),
+      );
+      sNoHeader.value = excel.TextCellValue('S.No');
+      sNoHeader.cellStyle = excel.CellStyle(bold: true);
+      columnIndex++;
 
-        // Convert value to string safely
-        String cellValue = _extractCellValue(value);
-        
-        // Always use TextCellValue to avoid parsing issues
-        cell.value = excel.TextCellValue(cellValue);
-        cell.cellStyle = excel.CellStyle(
-          backgroundColorHex: excel.ExcelColor.fromHexString(rowColor),
-          horizontalAlign: excel.HorizontalAlign.Left,
+      for (final key in headerMap.keys) {
+        final cell = sheet.cell(
+          excel.CellIndex.indexByColumnRow(
+            columnIndex: columnIndex,
+            rowIndex: headerRowIndex,
+          ),
         );
-        
+        cell.value =
+            excel.TextCellValue(_availableHeadersMap[key] ?? key);
+        cell.cellStyle = excel.CellStyle(bold: true);
         columnIndex++;
       }
-    }
 
-    sheet.setDefaultColumnWidth(15.0);
+      // ===== DATA ROWS =====
+      for (int i = 0; i < _filteredData.length; i++) {
+        columnIndex = 0;
+        final rowIndex = i + headerRowIndex + 1;
 
-    final excelData = workbook.encode();
-    if (excelData == null) throw Exception('Failed to save Excel file');
+        final sNoCell = sheet.cell(
+          excel.CellIndex.indexByColumnRow(
+            columnIndex: columnIndex,
+            rowIndex: rowIndex,
+          ),
+        );
+        sNoCell.value = excel.TextCellValue((i + 1).toString());
+        columnIndex++;
 
-    await _saveFile(excelData, '${widget.fileName}.xlsx');
-  });
-}
+        final rowData = widget.toTableDataMap(_filteredData[i]);
+        for (final key in headerMap.keys) {
+          final cell = sheet.cell(
+            excel.CellIndex.indexByColumnRow(
+              columnIndex: columnIndex,
+              rowIndex: rowIndex,
+            ),
+          );
+          cell.value = excel.TextCellValue(
+            _extractCellValue(rowData[key]),
+          );
+          columnIndex++;
+        }
+      }
+
+      final bytes = workbook.encode();
+      if (bytes == null) throw Exception('Excel encode failed');
+
+      await _saveFile(bytes, '${widget.fileName}.xlsx');
+    });
+  }
+
 
 // Add this helper method in your FlexibleDataTableState class
-String _extractCellValue(dynamic value) {
-  if (value == null) return '';
-  
-  // Handle Map (like your vehicle number object)
-  if (value is Map) {
-    if (value.containsKey('number')) {
-      return value['number']?.toString() ?? '';
-    }
-    if (value.containsKey('name')) {
-      return value['name']?.toString() ?? '';
-    }
-    // Return first non-null value from map
-    for (var val in value.values) {
-      if (val != null && val.toString().isNotEmpty) {
-        return val.toString();
+  String _extractCellValue(dynamic value) {
+    if (value == null) return '';
+
+    // Handle Map (like your vehicle number object)
+    if (value is Map) {
+      if (value.containsKey('number')) {
+        return value['number']?.toString() ?? '';
       }
+      if (value.containsKey('name')) {
+        return value['name']?.toString() ?? '';
+      }
+      // Return first non-null value from map
+      for (var val in value.values) {
+        if (val != null && val.toString().isNotEmpty) {
+          return val.toString();
+        }
+      }
+      return '';
     }
-    return '';
+
+    // Handle List
+    if (value is List) {
+      return value.map((e) => e?.toString() ?? '').join(', ');
+    }
+
+    // Handle DateTime
+    if (value is DateTime) {
+      return value.toIso8601String();
+    }
+
+    // Handle bool
+    if (value is bool) {
+      return value ? 'Yes' : 'No';
+    }
+
+    // Handle numbers with decimal points
+    if (value is double) {
+      return value.toStringAsFixed(2);
+    }
+
+    // Handle everything else as string
+    return value.toString();
   }
-  
-  // Handle List
-  if (value is List) {
-    return value.map((e) => e?.toString() ?? '').join(', ');
-  }
-  
-  // Handle DateTime
-  if (value is DateTime) {
-    return value.toIso8601String();
-  }
-  
-  // Handle bool
-  if (value is bool) {
-    return value ? 'Yes' : 'No';
-  }
-  
-  // Handle numbers with decimal points
-  if (value is double) {
-    return value.toStringAsFixed(2);
-  }
-  
-  // Handle everything else as string
-  return value.toString();
-}
 
   Map<String, dynamic> _getHeaderMap() {
     if (widget.headers != null && widget.headers!.isNotEmpty) {
@@ -2719,47 +2744,92 @@ String _extractCellValue(dynamic value) {
   }
 
   Future<void> _exportToPdf() async {
-  await _showProgressDialogWithTimeout('Generating PDF file...', () async {
-    final pdf = pw.Document();
-    final headerMap = _getVisibleHeaderMap();
+    await _showProgressDialogWithTimeout('Generating PDF file...', () async {
+      final pdf = pw.Document();
 
-    pdf.addPage(
-      pw.MultiPage(
-        pageFormat: PdfPageFormat.a4.landscape,
-        build: (context) => [
-          pw.TableHelper.fromTextArray(
-            headers: [
-              'S.No',
-              ...headerMap.keys.map((key) => _availableHeadersMap[key] ?? key)
-            ],
-            data: _filteredData.asMap().entries.map((entry) {
-              final map = widget.toTableDataMap(entry.value);
-              return [
-                (entry.key + 1).toString(),
-                ...headerMap.keys.map((key) => _extractCellValue(map[key]))
-              ];
-            }).toList(),
-            headerStyle: pw.TextStyle(
-              fontWeight: pw.FontWeight.bold,
-              color: PdfColors.white,
-            ),
-            headerDecoration: pw.BoxDecoration(
-              color: PdfColor.fromHex('6D28D9'),
-            ),
-            headerHeight: 25,
-            cellHeight: 20,
-            cellAlignments: {
-              0: pw.Alignment.center,
-            },
-          ),
-        ],
-      ),
-    );
+      final headerMap = _getVisibleHeaderMap();
+      final totalRecords = _filteredData.length;
+      final title = widget.exportTitle != null
+          ? widget.exportTitle!
+          : _formatTitle(widget.fileName);
 
-    final bytes = await pdf.save();
-    await _saveFile(bytes, '${widget.fileName}.pdf');
-  });
-}
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4.landscape,
+          margin: const pw.EdgeInsets.all(24),
+          build: (context) => [
+            // ===== TITLE =====
+            pw.Center(
+                child: pw.Text(
+                  title,
+                  style: pw.TextStyle(
+                    fontSize: 20,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                )
+            ),
+
+            pw.SizedBox(height: 6),
+
+            // ===== TOTAL =====
+            pw.Center(
+              child: pw.Text(
+                'Total Records: $totalRecords',
+                style: pw.TextStyle(
+                  fontSize: 12,
+                  color: PdfColors.grey700,
+                ),
+              ),
+            ),
+
+            pw.SizedBox(height: 16),
+
+            // ===== TABLE =====
+            pw.TableHelper.fromTextArray(
+              border: pw.TableBorder.all(
+                color: PdfColors.grey300,
+                width: 0.5,
+              ),
+              headerDecoration: pw.BoxDecoration(
+                color: PdfColor.fromHex('6D28D9'),
+              ),
+              headerStyle: pw.TextStyle(
+                fontWeight: pw.FontWeight.bold,
+                color: PdfColors.white,
+                fontSize: 10,
+              ),
+              cellStyle: const pw.TextStyle(
+                fontSize: 9,
+              ),
+              cellAlignment: pw.Alignment.centerLeft,
+              cellHeight: 22,
+
+              headers: [
+                'S.No',
+                ...headerMap.keys.map(
+                      (key) => _availableHeadersMap[key] ?? key,
+                ),
+              ],
+
+              data: _filteredData.asMap().entries.map((entry) {
+                final rowMap = widget.toTableDataMap(entry.value);
+                return [
+                  (entry.key + 1).toString(),
+                  ...headerMap.keys.map(
+                        (key) => _extractCellValue(rowMap[key]),
+                  ),
+                ];
+              }).toList(),
+            ),
+          ],
+        ),
+      );
+
+      final bytes = await pdf.save();
+      await _saveFile(bytes, '${widget.fileName}.pdf');
+    });
+  }
+
 
   Future<void> _showProgressDialogWithTimeout(String message,
       Future<void> Function() operation) async {
