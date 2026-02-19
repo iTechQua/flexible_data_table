@@ -12,6 +12,8 @@ import 'package:share_plus/share_plus.dart';
 import 'package:universal_html/html.dart' as html;
 import 'package:excel/excel.dart' as excel;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/services.dart';
+
 
 enum FlexibleDataTableType {
   standard,
@@ -2559,12 +2561,11 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
 
   Future<void> _exportToExcel() async {
     await _showProgressDialogWithTimeout('Generating Excel file...', () async {
-      final workbook = excel.Excel.createExcel();
-      final sheet =
-      workbook.sheets[workbook.getDefaultSheet() ?? 'Sheet1'];
-      if (sheet == null) throw Exception('Failed to create sheet');
-
       final headerMap = _getVisibleHeaderMap();
+      final hasCustomSno = _hasSNoKey(headerMap.keys);
+      final workbook = excel.Excel.createExcel();
+      final sheet =workbook.sheets[workbook.getDefaultSheet() ?? 'Sheet1'];
+      if (sheet == null) throw Exception('Failed to create sheet');
       final totalRecords = _filteredData.length;
 
       // ===== TITLE =====
@@ -2612,60 +2613,56 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
       );
 
       // ===== COLUMN HEADERS (ROW 3) =====
-      int columnIndex = 0;
       final headerRowIndex = 3;
-
-      final sNoHeader = sheet.cell(
-        excel.CellIndex.indexByColumnRow(
+      int columnIndex = 0;
+      if (!hasCustomSno) {
+        sheet
+            .cell(excel.CellIndex.indexByColumnRow(
           columnIndex: columnIndex,
           rowIndex: headerRowIndex,
-        ),
-      );
-      sNoHeader.value = excel.TextCellValue('S.No');
-      sNoHeader.cellStyle = excel.CellStyle(bold: true);
-      columnIndex++;
-
-      for (final key in headerMap.keys) {
-        final cell = sheet.cell(
-          excel.CellIndex.indexByColumnRow(
-            columnIndex: columnIndex,
-            rowIndex: headerRowIndex,
-          ),
-        );
-        cell.value =
-            excel.TextCellValue(_availableHeadersMap[key] ?? key);
-        cell.cellStyle = excel.CellStyle(bold: true);
+        ))
+            .value = excel.TextCellValue('S.No');
         columnIndex++;
       }
+
+      for (final key in headerMap.keys) {
+        sheet
+            .cell(excel.CellIndex.indexByColumnRow(
+          columnIndex: columnIndex,
+          rowIndex: headerRowIndex,
+        ))
+            .value = excel.TextCellValue(_availableHeadersMap[key] ?? key);
+        columnIndex++;
+      }
+
 
       // ===== DATA ROWS =====
       for (int i = 0; i < _filteredData.length; i++) {
         columnIndex = 0;
         final rowIndex = i + headerRowIndex + 1;
 
-        final sNoCell = sheet.cell(
-          excel.CellIndex.indexByColumnRow(
+        if (!hasCustomSno) {
+          sheet
+              .cell(excel.CellIndex.indexByColumnRow(
             columnIndex: columnIndex,
             rowIndex: rowIndex,
-          ),
-        );
-        sNoCell.value = excel.TextCellValue((i + 1).toString());
-        columnIndex++;
+          ))
+              .value = excel.TextCellValue((i + 1).toString());
+          columnIndex++;
+        }
 
         final rowData = widget.toTableDataMap(_filteredData[i]);
         for (final key in headerMap.keys) {
-          final cell = sheet.cell(
-            excel.CellIndex.indexByColumnRow(
-              columnIndex: columnIndex,
-              rowIndex: rowIndex,
-            ),
-          );
-          cell.value = excel.TextCellValue(
-            _extractCellValue(rowData[key]),
-          );
+          sheet
+              .cell(excel.CellIndex.indexByColumnRow(
+            columnIndex: columnIndex,
+            rowIndex: rowIndex,
+          ))
+              .value = excel.TextCellValue(_extractCellValue(rowData[key]));
           columnIndex++;
         }
       }
+
 
       final bytes = workbook.encode();
       if (bytes == null) throw Exception('Excel encode failed');
@@ -2674,6 +2671,16 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     });
   }
 
+  bool _hasSNoKey(Iterable<String> keys) {
+    return keys.any((k) {
+      final normalized = k
+          .toLowerCase()
+          .replaceAll('.', '')
+          .replaceAll('_', '')
+          .replaceAll(' ', '');
+      return normalized == 'sno';
+    });
+  }
 
 // Add this helper method in your FlexibleDataTableState class
   String _extractCellValue(dynamic value) {
@@ -2707,16 +2714,17 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     }
 
     // Handle bool
-    if (value is bool) {
-      return value ? 'Yes' : 'No';
-    }
-
-    // Handle numbers with decimal points
     if (value is double) {
+      if (value == value.toInt()) {
+        return value.toInt().toString();
+      }
       return value.toStringAsFixed(2);
     }
 
-    // Handle everything else as string
+    if (value is int) {
+      return value.toString();
+    }
+
     return value.toString();
   }
 
@@ -2745,10 +2753,17 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
 
   Future<void> _exportToPdf() async {
     await _showProgressDialogWithTimeout('Generating PDF file...', () async {
-      final pdf = pw.Document();
 
       final headerMap = _getVisibleHeaderMap();
+      final hasCustomSno = _hasSNoKey(headerMap.keys);
       final totalRecords = _filteredData.length;
+
+      // 🔥 Load Rupee Supported Font
+      final fontData =
+      await rootBundle.load('assets/fonts/NotoSans-Regular.ttf');
+      final ttf = pw.Font.ttf(fontData.buffer.asByteData());
+
+      final pdf = pw.Document();
       final title = widget.exportTitle != null
           ? widget.exportTitle!
           : _formatTitle(widget.fileName);
@@ -2758,15 +2773,17 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
           pageFormat: PdfPageFormat.a4.landscape,
           margin: const pw.EdgeInsets.all(24),
           build: (context) => [
+
             // ===== TITLE =====
             pw.Center(
-                child: pw.Text(
-                  title,
-                  style: pw.TextStyle(
-                    fontSize: 20,
-                    fontWeight: pw.FontWeight.bold,
-                  ),
-                )
+              child: pw.Text(
+                title,
+                style: pw.TextStyle(
+                  font: ttf,
+                  fontSize: 20,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
             ),
 
             pw.SizedBox(height: 6),
@@ -2776,8 +2793,8 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
               child: pw.Text(
                 'Total Records: $totalRecords',
                 style: pw.TextStyle(
+                  font: ttf,
                   fontSize: 12,
-                  color: PdfColors.grey700,
                 ),
               ),
             ),
@@ -2794,27 +2811,28 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
                 color: PdfColor.fromHex('6D28D9'),
               ),
               headerStyle: pw.TextStyle(
+                font: ttf,
                 fontWeight: pw.FontWeight.bold,
                 color: PdfColors.white,
                 fontSize: 10,
               ),
-              cellStyle: const pw.TextStyle(
+              cellStyle: pw.TextStyle(
+                font: ttf,
                 fontSize: 9,
               ),
               cellAlignment: pw.Alignment.centerLeft,
               cellHeight: 22,
 
               headers: [
-                'S.No',
-                ...headerMap.keys.map(
-                      (key) => _availableHeadersMap[key] ?? key,
-                ),
+                if (!hasCustomSno) 'S.No',
+                ...headerMap.keys.map((k) => _availableHeadersMap[k] ?? k),
               ],
 
               data: _filteredData.asMap().entries.map((entry) {
                 final rowMap = widget.toTableDataMap(entry.value);
+
                 return [
-                  (entry.key + 1).toString(),
+                  if (!hasCustomSno) (entry.key + 1).toString(),
                   ...headerMap.keys.map(
                         (key) => _extractCellValue(rowMap[key]),
                   ),
@@ -2831,6 +2849,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
   }
 
 
+
   Future<void> _showProgressDialogWithTimeout(String message,
       Future<void> Function() operation) async {
     bool needToDismiss = true;
@@ -2843,7 +2862,7 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
     Timer? timeoutTimer;
     timeoutTimer = Timer(const Duration(seconds: 15), () {
       if (needToDismiss && mounted && !operationComplete) {
-        print("Operation timeout - forcing dialog dismissal");
+        debugPrint("Operation timeout - forcing dialog dismissal");
         _dismissDialog();
         needToDismiss = false;
 
@@ -2899,35 +2918,35 @@ class FlexibleDataTableState<T> extends State<FlexibleDataTable<T>> {
 
     try {
       if (Navigator.of(context, rootNavigator: true).canPop()) {
-        print("Dismissing dialog with rootNavigator");
+        debugPrint("Dismissing dialog with rootNavigator");
         Navigator.of(context, rootNavigator: true).pop();
         return;
       }
     } catch (e) {
-      print("Standard Navigator dismissal failed: $e");
+      debugPrint("Standard Navigator dismissal failed: $e");
     }
 
     try {
       if (Navigator.of(context).canPop()) {
-        print("Dismissing dialog with basic Navigator");
+        debugPrint("Dismissing dialog with basic Navigator");
         Navigator.of(context).pop();
         return;
       }
     } catch (e) {
-      print("Basic Navigator dismissal failed: $e");
+      debugPrint("Basic Navigator dismissal failed: $e");
     }
 
     try {
       if (Navigator.canPop(context)) {
-        print("Dismissing dialog with direct pop");
+        debugPrint("Dismissing dialog with direct pop");
         Navigator.pop(context);
         return;
       }
     } catch (e) {
-      print("Direct pop dismissal failed: $e");
+      debugPrint("Direct pop dismissal failed: $e");
     }
 
-    print("Warning: Could not dismiss dialog through normal means");
+    debugPrint("Warning: Could not dismiss dialog through normal means");
   }
 
   bool _isDialogShowing = false;

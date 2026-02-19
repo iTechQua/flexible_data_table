@@ -1,3 +1,9 @@
+## [1.1.7] - 2025-12-28
+
+### Updated
+- This version added rupee symbol for export pdf and excel file when currency type is set to rupee
+- Also added export file name with date time when export file name is not provided
+
 ## [1.1.6] - 2025-12-28
 
 ### Updated
